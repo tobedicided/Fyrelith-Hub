@@ -246,7 +246,7 @@ if previousFarm and type(previousFarm.closeHalloweenShop)=="function" then pcall
 if previousFarm and type(previousFarm.saveConfig)=="function" then pcall(previousFarm.saveConfig) end
 if G.BlueFarm then G.BlueFarm.running=false end
 do local previousGui=bootParent:FindFirstChild("BlueFarmControls") if previousGui then previousGui:Destroy() end end
-local S={version="dashboard-183-zombie-variant-stability",running=true,enabled=true,cycles=0,opened=0,bought=0,sold=0,errors=0,lastError="",strikerUpgrades=0,luckUpgrades=0,placed=0,waitingBoxes=0,baseSwaps=0,gameUpgrades=0}
+local S={version="dashboard-185-tournament-qte",running=true,enabled=true,cycles=0,opened=0,bought=0,sold=0,errors=0,lastError="",strikerUpgrades=0,luckUpgrades=0,placed=0,waitingBoxes=0,baseSwaps=0,gameUpgrades=0}
 G.BlueFarm=S
 S.referenceLayout=true
 do
@@ -254,7 +254,7 @@ local deviceInput=game:GetService("UserInputService")
 S.mobileLite=G.FyrelithMobileLite==true or (deviceInput.TouchEnabled and G.FyrelithMobileLite~=false)
 S.workerInterval=function(name,period)
  if not S.mobileLite then return period end
- local minimum=({Training=0.2,Halloween=0.3,["Auto Grave"]=0.4,Events=0.75,["Auto Zombie"]=0.6,["Auto Obby"]=0.4,["Travel recovery"]=0.4,["Event status"]=8,Missions=2})[name] or 1
+ local minimum=({Training=0.2,Events=0.75,["Auto Obby"]=0.4,["Travel recovery"]=0.4,["Event status"]=8,Missions=2})[name] or 1
  return math.max(period,minimum)
 end
 end
@@ -281,7 +281,7 @@ do
   -- Allow binders to construct their handler before the next discovery.
   for _,entry in cache do entry.expires=math.max(entry.created+(S.mobileLite and 30 or 1),math.min(entry.expires,deadline)) end
  end
- for _,tag in {"DropperBasePart","VariantTokenSpawn","GraveSpawnPart","HouseSystemModel"} do
+ for _,tag in {"DropperBasePart","VariantTokenSpawn"} do
   table.insert(signals,collection:GetInstanceAddedSignal(tag):Connect(changed))
   table.insert(signals,collection:GetInstanceRemovedSignal(tag):Connect(changed))
  end
@@ -357,6 +357,9 @@ local X={sellSpareStrikers=false,polisher=false,luckPotion=false,cashPotion=fals
 S.options=X
 X.noRollLimit=false
 X.autoObby=false
+X.autoTournament=false
+X.tournamentAutoStart=true
+X.tournamentPerfect=true
 X.strikerUpgrade=false
 X.uiKey="RightShift"
 X.themeR=0 X.themeG=0 X.themeB=0
@@ -370,10 +373,6 @@ X.autoSellCrates=false
 X.autoSellPolishedCrates=false
 X.polisherGoldenHourOnly=false
 X.polisherPickupDelay=0
-X.graveESP=false
-X.autoGrave=false
-X.graveCollect=true
-X.graveUnit=""
 X.collectItems={}
 X.collectVariants={}
 X.eventKinds={rain=true,variant=true}
@@ -381,15 +380,6 @@ X.stopAtFilter=true
 X.autoMissions=true
 X.missionDaily=true
 X.missionEvent=true
-X.autoZombie=false
-X.halloween=false
-X.halloweenCorn=true
-X.halloweenBags=true
-X.halloweenSellBags=true
-X.halloweenHouses=false
-X.halloweenReturn=false
-X.halloweenPriority=true
-X.halloweenHouseGoal=43
 X.travelSettle=0.18
 X.pickupRetry=0.45
 X.pickupTimeout=2.5
@@ -457,7 +447,6 @@ S.travelValue=function(key)
  if not value or value~=value then return bounds and bounds[1] or 0 end
  return bounds and math.clamp(value,bounds[1],bounds[2]) or value
 end
-X.halloweenFinishNight=true
 X.skinSell=false X.skinSellTypes={} X.skinBuyTypes={} X.trainingQueue={} X.trainingQueueRunning=false X.trainingQueuePreviousNoLimit=false
 S.hasSelectedTargets=function(targets)
  if type(targets)~="table" then return false end
@@ -632,6 +621,7 @@ do
 end
 S.towerProtected={}
 S.towerActiveUnits={}
+S.tournamentProtected={}
 S.inventoryQueue={} S.inventoryTicket=0
 S.acquireInventory=function(owner)
  if S.inventoryOwner==owner then return true end
@@ -681,22 +671,11 @@ S.notePolisherPickup=function(part)
  local timer=S.polisherPickupTimers[part]
  if timer then timer.sentAt=os.clock() timer.sentCount=tonumber(part:GetAttribute("PendingBallCount")) or 0 end
 end
-do (function()
- local module=RS.Shared.Services:FindFirstChild("DayNightService")
- local day=module and require(module)
-   S.halloweenHasPriority=function()
-   if S.zombieHasPriority and S.zombieHasPriority() then return true end
-  if not S.halloweenSceneActive and S.variantTokenHasPriority and S.variantTokenHasPriority() then return false end
-  if S.halloweenTravel or S.halloweenSceneActive then return true end
-  if S.nativeMenuRequested then return false end
-  if not X.halloween or not X.halloweenPriority then return false end
-  if X.halloweenHouses and day and day.CanTrickOrTreat() then return true end
-  return X.halloweenCorn and S.halloween and S.halloween.cornTravelReady==true or false
- end
- S.characterTaskBusy=function()
-  return S.zombieTravel or S.graveTravel or S.graveSceneActive or S.halloweenTravel or S.halloweenSceneActive or S.trainingTravel or S.obbyTravel or S.sharedTravelActive or S.tpReturnActive or S.shopOpen
- end
-end)() end
+-- Shared task coordination after removal of Halloween and grave automation.
+S.variantTokenHasPriority=function()return false end
+S.characterTaskBusy=function()
+ return S.trainingTravel or S.obbyTravel or S.sharedTravelActive or S.tpReturnActive or S.shopOpen
+end
 for _,id in X.towerTeam do S.towerProtected[id]=true end
 if X.unit and D.GetData().PlayerUnits[X.unit] then S.reservedUnits[X.unit]=true else X.unit=nil end
 S.featureStatus={}
@@ -938,7 +917,7 @@ local localeRows={
 }
 
 -- Cover modern UI strings and reverse existing English aliases without changing English output.
-for _,r in {{"Home","หน้าหลัก"},{"Farm & Team","ฟาร์มและทีม"},{"Boosts","บัฟ"},{"Inventory & Shop","คลังและร้านค้า"},{"Grade & Trait","เกรดและคุณสมบัติ"},{"Halloween & World","ฮาโลวีนและแผนที่"},{"Travel","การเดินทาง"},{"Settings","ตั้งค่า"},{"Live dashboard","สถานะปัจจุบัน"},{"Activity & diagnostics","กิจกรรมและการตรวจสอบ"},{"Team management","จัดการทีม"},{"Locker automation","ระบบกล่องอัตโนมัติ"},{"Buying filters","ตัวกรองการซื้อ"},{"Polisher","เครื่องขัด"},{"Potion permissions","การอนุญาตใช้ยา"},{"Selected Striker","นักเตะที่เลือก"},{"Roll controls","ตั้งค่าการสุ่ม"},{"Grade & Trait targets","เป้าหมายเกรดและคุณสมบัติ"},{"Stage & battle","ด่านและการต่อสู้"},{"Team selection","เลือกทีม"},{"Trick-or-Treat","เคาะประตูรับขนม"},{"Grave excavation","ขุดหลุมศพ"},{"World collection","เก็บของในแผนที่"},{"Collection filters","ตัวกรองการเก็บ"},{"Movement mode","รูปแบบการเดินทาง"},{"Route settings","ตั้งค่าเส้นทาง"},{"Diagnostics","ตรวจสอบระบบ"},{"Appearance","รูปลักษณ์"},{"Language","ภาษา"},{"Window & input","หน้าต่างและปุ่มควบคุม"},{"Configuration","การตั้งค่าที่บันทึก"},{"Search features…","ค้นหาฟังก์ชัน…"},{"Search ball types…","ค้นหาชนิดบอล…"},{"Search items…","ค้นหาไอเท็ม…"},{" controls"," รายการ"},{"Base slots","ช่องในฐาน"},{"Inventory","คลัง"},{"Enabled systems","ระบบที่เปิด"},{"Script errors","ข้อผิดพลาดสคริปต์"},{"Choose Ball Skins to Buy (","เลือกสกินบอลที่จะซื้อ ("},{" selected)"," รายการที่เลือก)"},{"Auto Buy Selected Ball Skins","ซื้อสกินบอลที่เลือกอัตโนมัติ"},{"Choose ball types below. Uses Cash and your spending limits.","เลือกชนิดบอลด้านล่าง ใช้เงินเกมตามงบที่กำหนด"},{"Auto Buy OFF • Choose ball types, then enable Auto Buy","ปิดการซื้ออัตโนมัติ • เลือกชนิดบอลแล้วเปิดสวิตช์"},{"Choose Ball Skins to Buy • No types selected","เลือกสกินบอลที่จะซื้อ • ยังไม่ได้เลือกชนิด"},{"Select all","เลือกทั้งหมด"},{"Clear all","ล้างทั้งหมด"},{"Choose Ball Skins to Sell","เลือกสกินบอลที่จะขาย"},{"Auto Sell Selected Ball Skins","ขายสกินบอลที่เลือกอัตโนมัติ"},{"Sells all inventory copies of selected types. Favorites are always kept.","ขายสกินชนิดที่เลือกในคลัง เก็บรายการโปรดไว้เสมอ"},{"Back to Fyrelith  ×","กลับไป Fyrelith  ×"},{"Grave complete • Collecting / continuing","ขุดเสร็จแล้ว • เก็บขนมและทำงานต่อ"},{"Digging • Inventory automation continues","กำลังขุด • ระบบคลังยังทำงานต่อ"},{"Waiting for available graves • Ready: ","รอหลุมศพที่พร้อมขุด • พร้อม: "},{" / Map: "," / ทั้งแผนที่: "},{"Waiting for Trick-or-Treat • Grave route resumes in daytime","รอเคาะประตู • ขุดหลุมศพต่อในตอนกลางวัน"},{"Trick-or-Treat: waiting for night","เคาะประตู: รอตอนกลางคืน"},{"At next door • Waiting for server knock cooldown","ถึงประตูถัดไป • รอคูลดาวน์จากเซิร์ฟเวอร์"},{"House knock confirmed: ","ยืนยันการเคาะบ้าน: "},{"Nearby Candy Corn collected","เก็บแคนดี้คอร์นที่อยู่ใกล้กันแล้ว"},{"Candy Corn unconfirmed; retrying later","ยังไม่ยืนยันการเก็บแคนดี้คอร์น จะลองใหม่"},{"Collecting elevated Candy Corn • ","กำลังเก็บแคนดี้คอร์นบนที่สูง • "},{"No safe Candy Corn route","ไม่พบเส้นทางเก็บแคนดี้คอร์นที่ปลอดภัย"},{"Waiting for another trip","รอการเดินทางอื่นเสร็จ"},{"Waiting for another task","รองานอื่นเสร็จ"},{"Waiting for game menu","รอปิดเมนูเกม"},{"Target reached","ถึงเป้าหมายแล้ว"},{"Tokens depleted","โทเคนหมด"},{"Roll limit reached","ครบจำนวนสุ่มที่กำหนด"},{"No targets selected","ยังไม่ได้เลือกเป้าหมาย"},{"Waiting for server confirmation","กำลังรอเซิร์ฟเวอร์ยืนยัน"},{"Waiting for station travel; Auto remains ON","กำลังรอเดินทางไปสถานี ระบบอัตโนมัติยังเปิดอยู่"},{"Owned: ","มีในคลัง: "},{"Favorite — protected","รายการโปรด — ไม่ขาย"},{"Selected types sell all inventory copies","ขายสกินชนิดที่เลือกทุกชิ้นในคลัง"},{"Spawned: ","เกิดในแผนที่: "},{"Select shown","เลือกที่แสดง"},{"Clear shown","ล้างที่แสดง"},{"Done","เสร็จสิ้น"},{"All","ทั้งหมด"},{"Tokens","โทเคน"},{"Potions","ยา"},{"Event tokens","โทเคนกิจกรรม"},{"Running","ทำงาน"},{"Paused","หยุดชั่วคราว"},{"Resume","ทำงานต่อ"},{"Pause","หยุด"},{"Reset window size","คืนขนาดหน้าต่างเริ่มต้น"},{"Auto Save Config","บันทึกการตั้งค่าอัตโนมัติ"},{"Save Config","บันทึกการตั้งค่า"},{"Reset Config to Default","คืนค่าการตั้งค่าเริ่มต้น"}} do table.insert(localeRows,{r[1],r[2],r[1]}) end
+for _,r in {{"Home","หน้าหลัก"},{"Farm & Team","ฟาร์มและทีม"},{"Boosts","บัฟ"},{"Inventory & Shop","คลังและร้านค้า"},{"Grade & Trait","เกรดและคุณสมบัติ"},{"Halloween & World","ฮาโลวีนและแผนที่"},{"Travel","การเดินทาง"},{"Settings","ตั้งค่า"},{"Live dashboard","สถานะปัจจุบัน"},{"Activity & diagnostics","กิจกรรมและการตรวจสอบ"},{"Team management","จัดการทีม"},{"Locker automation","ระบบกล่องอัตโนมัติ"},{"Buying filters","ตัวกรองการซื้อ"},{"Polisher","เครื่องขัด"},{"Potion permissions","การอนุญาตใช้ยา"},{"Selected Striker","นักเตะที่เลือก"},{"Roll controls","ตั้งค่าการสุ่ม"},{"Grade & Trait targets","เป้าหมายเกรดและคุณสมบัติ"},{"Stage & battle","ด่านและการต่อสู้"},{"Team selection","เลือกทีม"},{"World collection","เก็บของในแผนที่"},{"Collection filters","ตัวกรองการเก็บ"},{"Movement mode","รูปแบบการเดินทาง"},{"Route settings","ตั้งค่าเส้นทาง"},{"Diagnostics","ตรวจสอบระบบ"},{"Appearance","รูปลักษณ์"},{"Language","ภาษา"},{"Window & input","หน้าต่างและปุ่มควบคุม"},{"Configuration","การตั้งค่าที่บันทึก"},{"Search features…","ค้นหาฟังก์ชัน…"},{"Search ball types…","ค้นหาชนิดบอล…"},{"Search items…","ค้นหาไอเท็ม…"},{" controls"," รายการ"},{"Base slots","ช่องในฐาน"},{"Inventory","คลัง"},{"Enabled systems","ระบบที่เปิด"},{"Script errors","ข้อผิดพลาดสคริปต์"},{"Choose Ball Skins to Buy (","เลือกสกินบอลที่จะซื้อ ("},{" selected)"," รายการที่เลือก)"},{"Auto Buy Selected Ball Skins","ซื้อสกินบอลที่เลือกอัตโนมัติ"},{"Choose ball types below. Uses Cash and your spending limits.","เลือกชนิดบอลด้านล่าง ใช้เงินเกมตามงบที่กำหนด"},{"Auto Buy OFF • Choose ball types, then enable Auto Buy","ปิดการซื้ออัตโนมัติ • เลือกชนิดบอลแล้วเปิดสวิตช์"},{"Choose Ball Skins to Buy • No types selected","เลือกสกินบอลที่จะซื้อ • ยังไม่ได้เลือกชนิด"},{"Select all","เลือกทั้งหมด"},{"Clear all","ล้างทั้งหมด"},{"Choose Ball Skins to Sell","เลือกสกินบอลที่จะขาย"},{"Auto Sell Selected Ball Skins","ขายสกินบอลที่เลือกอัตโนมัติ"},{"Sells all inventory copies of selected types. Favorites are always kept.","ขายสกินชนิดที่เลือกในคลัง เก็บรายการโปรดไว้เสมอ"},{"Back to Fyrelith  ×","กลับไป Fyrelith  ×"},{"Grave complete • Collecting / continuing","ขุดเสร็จแล้ว • เก็บขนมและทำงานต่อ"},{"Digging • Inventory automation continues","กำลังขุด • ระบบคลังยังทำงานต่อ"},{"Waiting for available graves • Ready: ","รอหลุมศพที่พร้อมขุด • พร้อม: "},{" / Map: "," / ทั้งแผนที่: "},{"Waiting for Trick-or-Treat • Grave route resumes in daytime","รอเคาะประตู • ขุดหลุมศพต่อในตอนกลางวัน"},{"Trick-or-Treat: waiting for night","เคาะประตู: รอตอนกลางคืน"},{"At next door • Waiting for server knock cooldown","ถึงประตูถัดไป • รอคูลดาวน์จากเซิร์ฟเวอร์"},{"House knock confirmed: ","ยืนยันการเคาะบ้าน: "},{"Nearby Candy Corn collected","เก็บแคนดี้คอร์นที่อยู่ใกล้กันแล้ว"},{"Candy Corn unconfirmed; retrying later","ยังไม่ยืนยันการเก็บแคนดี้คอร์น จะลองใหม่"},{"Collecting elevated Candy Corn • ","กำลังเก็บแคนดี้คอร์นบนที่สูง • "},{"No safe Candy Corn route","ไม่พบเส้นทางเก็บแคนดี้คอร์นที่ปลอดภัย"},{"Waiting for another trip","รอการเดินทางอื่นเสร็จ"},{"Waiting for another task","รองานอื่นเสร็จ"},{"Waiting for game menu","รอปิดเมนูเกม"},{"Target reached","ถึงเป้าหมายแล้ว"},{"Tokens depleted","โทเคนหมด"},{"Roll limit reached","ครบจำนวนสุ่มที่กำหนด"},{"No targets selected","ยังไม่ได้เลือกเป้าหมาย"},{"Waiting for server confirmation","กำลังรอเซิร์ฟเวอร์ยืนยัน"},{"Waiting for station travel; Auto remains ON","กำลังรอเดินทางไปสถานี ระบบอัตโนมัติยังเปิดอยู่"},{"Owned: ","มีในคลัง: "},{"Favorite — protected","รายการโปรด — ไม่ขาย"},{"Selected types sell all inventory copies","ขายสกินชนิดที่เลือกทุกชิ้นในคลัง"},{"Spawned: ","เกิดในแผนที่: "},{"Select shown","เลือกที่แสดง"},{"Clear shown","ล้างที่แสดง"},{"Done","เสร็จสิ้น"},{"All","ทั้งหมด"},{"Tokens","โทเคน"},{"Potions","ยา"},{"Event tokens","โทเคนกิจกรรม"},{"Running","ทำงาน"},{"Paused","หยุดชั่วคราว"},{"Resume","ทำงานต่อ"},{"Pause","หยุด"},{"Reset window size","คืนขนาดหน้าต่างเริ่มต้น"},{"Auto Save Config","บันทึกการตั้งค่าอัตโนมัติ"},{"Save Config","บันทึกการตั้งค่า"},{"Reset Config to Default","คืนค่าการตั้งค่าเริ่มต้น"}} do table.insert(localeRows,{r[1],r[2],r[1]}) end
 do
  local count=#localeRows local existing={} for _,r in localeRows do existing[r[1]]=true end
  for i=1,count do local r=localeRows[i]
@@ -955,6 +934,7 @@ for _,r in {{"Add / Update Selected Striker in Queue","เพิ่ม / อั�
 for _,r in {{"Targets reached • Removed from queue","ได้ครบเป้าหมายแล้ว • นำออกจากคิวแล้ว"},{"No unqueued Strikers outside your base","ไม่มีนักเตะนอกฐานที่ยังไม่อยู่ในคิว"},{"Returning previous base Striker","กำลังคืนตัวเดิมเข้าฐาน"},{"This Striker is unavailable for the queue","นักเตะตัวนี้ไม่พร้อมเข้าคิว"}} do table.insert(localeRows,{r[1],r[2],r[1]}) end
 for _,r in {{"Candy Corn not received • Server did not confirm","ยังไม่ได้รับแคนดี้คอร์น • เซิร์ฟเวอร์ยังไม่ยืนยัน"},{"Candy Corn partly confirmed • ","ยืนยันแคนดี้คอร์นบางส่วน • "}} do table.insert(localeRows,{r[1],r[2],r[1]}) end
 table.insert(localeRows,{"Confirming Candy Bag sale before Candy Corn","กำลังยืนยันการขายถุงขนมก่อนเก็บแคนดี้คอร์น","Confirming Candy Bag sale before Candy Corn"})
+for _,r in {{"Tournament","ทัวร์นาเมนต์"},{"Auto Tournament","เล่นทัวร์นาเมนต์อัตโนมัติ"},{"Auto Start Tournament","เริ่มทัวร์นาเมนต์อัตโนมัติ"},{"Auto Perfect Timing","กดจังหวะ Perfect อัตโนมัติ"},{"Seasonal events","กิจกรรมตามฤดูกาล"},{"Choose forward passes and scoring opportunities. Independent from collection and Obby.","เลือกส่งบอลขึ้นหน้าและยิงตามโอกาส แยกจากระบบเก็บของและ Obby"},{"Equip the best available team and start once per opponent rotation after a win.","จัดทีมดีที่สุดที่พร้อมเล่น เมื่อชนะแล้วจะรอคู่แข่งรอบใหม่"},{"Press the native timing minigame when the rotating tick enters the Perfect zone.","กดมินิเกมเมื่อเข็มหมุนเข้าสู่พื้นที่ Perfect"}} do table.insert(localeRows,{r[1],r[2],r[1]}) end
 local localeExact={} for _,r in localeRows do localeExact[r[1]]=r end
 local localized=setmetatable({},{__mode="k"})
 local translate=(function()
@@ -1155,7 +1135,7 @@ local function page(name,title)
  columns[i]=column
  end
  pageColumns[sc]=columns S.uiPageEntries[sc]={}
- local b=make("TextButton",nav,{Name=name,Size=UDim2.new(1,0,0,44),Text=({Overview="Home",Farm="Farm & Team",Boosts="Boosts",Market="Inventory & Shop",Training="Grade & Trait",Tower="Tower",Events="Halloween & World",Travel="Travel",Setting="Settings"})[name] or title,Font=Enum.Font.GothamMedium,TextSize=12,TextColor3=Color3.fromRGB(180,198,220),BackgroundColor3=Color3.fromRGB(55,65,77),BorderSizePixel=0}) round(b)
+ local b=make("TextButton",nav,{Name=name,Size=UDim2.new(1,0,0,44),Text=({Overview="Home",Farm="Farm & Team",Boosts="Boosts",Market="Inventory & Shop",Training="Grade & Trait",Tower="Tower",Events="Seasonal events",Travel="Travel",Setting="Settings"})[name] or title,Font=Enum.Font.GothamMedium,TextSize=12,TextColor3=Color3.fromRGB(180,198,220),BackgroundColor3=Color3.fromRGB(55,65,77),BorderSizePixel=0}) round(b)
  make("Frame",b,{Name="ActiveMarker",Size=UDim2.new(0,3,1,-18),Position=UDim2.fromOffset(0,9),BackgroundColor3=blue,BorderSizePixel=0})
  pages[name]=sc tabs[name]=b
  b.Activated:Connect(function()switchPage(name)end)
@@ -1187,7 +1167,6 @@ local function toggle(parent,key,title,description,owner)
  if owner==X and (key=="autoSellPolishedCrates" or key=="polisherGoldenHourOnly") then
   S.setPolishedSaleMode(key,not owner[key])
  else owner[key]=not owner[key] end
- if owner==X and key=="autoGrave" and owner[key] and S.requestGraveSelection and (X.graveUnit=="" or not S.graveCandidateAllowed(X.graveUnit)) then S.requestGraveSelection() end
  if owner==X and S.potionConsent[key]~=nil then S.potionConsent[key]=owner[key]==true end
  refresh()
  end) refresh() table.insert(pageRefresh,refresh)
@@ -1694,75 +1673,14 @@ do
  table.insert(pageRefresh,function()if S.renderMissions then S.renderMissions() end end)
 end
 
-toggle(events,"esp","ESP ตำแหน่งกิจกรรม","Variant Token • Item Rain • จุดโบนัส Obby")
-toggle(events,"graveESP","Halloween Grave ESP","Show unoccupied grave locations. Does not dig, equip, or consume a Striker.")
-toggle(events,"autoGrave","Auto Grave • Dig with selected Striker","Visit available graves across the map with your selected Striker. Wait for Trick-or-Treat at night.")
-action(events,"Select Digging Striker",function()if S.pickGraveUnit then S.pickGraveUnit() end end).Name="SelectDiggingStriker"
-action(events,"Clear Digging Striker",function()if not S.graveTravel and not S.graveSceneActive then X.autoGrave=false X.graveUnit="" if S.refreshGraveInfo then S.refreshGraveInfo() end end end).Name="ClearDiggingStriker"
-toggle(events,"graveCollect","Collect Candy Corn between graves","Auto Grave collects landed Candy Corn after a dig. Native grave rewards are collected by the game.")
-S.graveInfo=label(events,"Digging Striker: None selected",120) S.graveInfo.Name="GraveStatus"
-table.insert(pageRefresh,function()if S.refreshGraveInfo then S.refreshGraveInfo() end end)
-
 do
- label(events,"Halloween 2026",32).Name="HalloweenHeading"
-   toggle(events,"autoZombie","Auto Zombie","Collect street zombies automatically. King first; resumes Halloween after the wave.")
-  S.zombieInfo=label(events,"Zombie OFF",210) S.zombieInfo.Name="HalloweenZombieStatus"
-  toggle(events,"halloween","Auto Halloween","Collect Candy Corn and manage Candy Bags. Uses TP / Tween from Travel.")
- toggle(events,"halloweenCorn","Collect Candy Corn","Automatically travel to existing, landed Candy Corn using the TP / Tween mode from Travel.")
- toggle(events,"halloweenBags","Collect Candy Bags from Base","Collect your own plot's Candy Bags when inventory has space.")
- toggle(events,"halloweenSellBags","Sell Candy Bags","Convert held Candy Bags to Halloween currency; verify inventory removal.")
- toggle(events,"halloweenHouses","Auto Trick-or-Treat • Night only","Revisit any house when its server cooldown ends. Continue while it is still night.")
- toggle(events,"halloweenFinishNight","Continue knocking until dawn","Continue until dawn, even after reaching the house target. Revisit houses only after their server cooldown ends.")
- S.halloweenInfo=label(events,"Halloween OFF",150) S.halloweenInfo.Name="HalloweenStatus"
- action(events,"Open Halloween Shop",function()
-  if S.selectingTraining or S.characterTaskBusy() and not S.nativeMenuRequested or not S.running then return end
-  local module=RS.Client.Core.Gui:FindFirstChild("HalloweenShopGuiClient")
-  local native=P.PlayerGui:FindFirstChild("HalloweenShopGui")
-  local frame=native and native:FindFirstChild("MainFrame")
-  if module and frame then
-   local ok,client=pcall(require,module)
-   if ok and type(client.Open)=="function" then
-    local previous=panel.Visible
-    local opened=pcall(client.Open)
-    if not opened or not frame.Visible then return end
-    S.shopOpen=true panel.Visible=false
-    -- This shop normally closes through its world-zone trigger. A remote open
-    -- needs its own reachable close control, outside the hidden dashboard.
-    local overlay=Instance.new("ScreenGui")
-    overlay.Name="BlueFarmHalloweenShopClose" overlay.ResetOnSpawn=false
-    overlay.DisplayOrder=math.max(gui.DisplayOrder,native.DisplayOrder)+10
-    overlay.ZIndexBehavior=Enum.ZIndexBehavior.Sibling overlay.Parent=P.PlayerGui
-    local close=make("TextButton",overlay,{Name="CloseHalloweenShop",AnchorPoint=Vector2.new(1,0),Position=UDim2.new(1,-16,0,12),Size=UDim2.fromOffset(190,44),Text="Close Halloween Shop  X",Font=Enum.Font.GothamBold,TextSize=13,TextColor3=Color3.new(1,1,1),BackgroundColor3=Color3.fromRGB(38,40,47),BorderSizePixel=0}) round(close,8)
-    local finished=false local escapeConnection
-    local function finish(requestClose)
-     if finished then return end
-     finished=true
-     if requestClose then
-      if type(client.Close)=="function" then pcall(client.Close) end
-      -- Some game versions expose Open only. Hide the native shop locally;
-      -- do not teleport, purchase, or change character/camera ownership.
-      if frame.Parent and frame.Visible then frame.Visible=false end
-     end
-     if escapeConnection then escapeConnection:Disconnect() end
-     overlay:Destroy()
-     S.closeHalloweenShop=nil S.shopOpen=false
-     if S.running and panel.Parent then if S.setMinimized then S.setMinimized(false,true) else panel.Visible=true end end
-    end
-    S.closeHalloweenShop=function()finish(true)end
-    close.Activated:Connect(S.closeHalloweenShop)
-    escapeConnection=UIS.InputBegan:Connect(function(input)
-     if input.KeyCode==Enum.KeyCode.Escape and not UIS:GetFocusedTextBox() then finish(true) end
-    end)
-    table.insert(connections,escapeConnection)
-    task.spawn(function()
-     while not finished and S.running and gui.Parent and native.Parent and native.Enabled and frame.Parent and frame.Visible do task.wait(0.1) end
-     finish(not S.running or not gui.Parent)
-    end)
-   end
-  end
- end).Name="OpenHalloweenShop"
- note(events,"Halloween shop purchases and Candy / Pumpkin Potion use are manual. Auto Sell Crate controls football crates only.")
+ toggle(events,"autoTournament","Auto Tournament","Choose forward passes and scoring opportunities. Independent from collection and Obby.")
+ toggle(events,"tournamentAutoStart","Auto Start Tournament","Equip the best available team and start once per opponent rotation after a win.")
+ toggle(events,"tournamentPerfect","Auto Perfect Timing","Press the native timing minigame when the rotating tick enters the Perfect zone.")
+ S.tournamentInfo=label(events,"Tournament OFF",150) S.tournamentInfo.Name="TournamentStatus"
 end
+
+toggle(events,"esp","ESP ตำแหน่งกิจกรรม","Variant Token • Item Rain • จุดโบนัส Obby")
 toggle(events,"mapCollect","เก็บของตามแมพอัตโนมัติ","Grade / Trait Token และ Potion ที่เกิดตามแมพ")
 toggle(events,"events","เก็บของ Event อัตโนมัติ","Item Rain ที่ตกถึงพื้น และ Variant Token")
 note(S.travelPage,"Travel starts automatically from each feature switch. Choose TP / Tween below; movement keys pause travel.")
@@ -1843,7 +1761,6 @@ do (function()
  field(group,"travelMaxAttempts","Maximum travel attempts per spawn",1,5)
  field(group,"travelRetryDelay","Retry failed item after (seconds)",1,60)
  field(group,"travelUnsafeRetry","Retry blocked route after (seconds)",2,60)
- toggle(group,"halloweenReturn","Return after Halloween pickups","OFF: continue from the pickup to the next Candy Corn or house for faster routes.")
  toggle(group,"halloweenPriority","Prioritize Halloween travel","Variant Tokens are collected first. Then night houses and pending Candy Corn take priority over other trips.")
  field(group,"halloweenHouseGoal","Confirmed Halloween houses per night",1,84)
 end)() end
@@ -1851,7 +1768,7 @@ note(S.travelPage,"Safe-ground checks and server cooldowns remain active. Emerge
 S.travelAuditInfo=label(S.travelPage,"Travel diagnostics: waiting",100)
 S.travelAuditInfo.Name="TravelAuditStatus"
 action(S.travelPage,"Save Travel Diagnostics",function()if S.saveTravelAudit then S.saveTravelAudit() end end)
-action(S.travelPage,"Resume paused travel",function()S.travelSuspended=false S.travelSuspendReason=nil S.halloweenRecovery=nil S.travelRecoveryState=nil end)
+action(S.travelPage,"Resume paused travel",function()S.travelSuspended=false S.travelSuspendReason=nil S.travelRecoveryState=nil end)
 
 do
  S.itemCatalog={} S.variantCatalog={}
@@ -1997,7 +1914,7 @@ do (function()
  S.uiGroups={} S.uiCoverage={before=0,after=0,pages=0}
  local names={Overview="Home",Farm="Farm & Team",Boosts="Boosts & Processing",Market="Inventory & Shop",Training="Grade & Trait",Tower="Tower",Events="Halloween & World",Travel="Movement",Setting="Settings"}
  S.uiPageNames=names
- local order={Overview={"Live dashboard","Activity & diagnostics"},Farm={"Team management","Buying filters","Locker automation"},Boosts={"Polisher","Potion permissions"},Market={"Inventory & Shop"},Training={"Selected Striker","Training queue","Roll controls","Grade & Trait targets"},Tower={"Stage & battle","Team selection"},Events={"Trick-or-Treat","Grave excavation","World collection","Collection filters","Missions"},Travel={"Movement mode","Route settings","Diagnostics"},Setting={"Appearance","Language","Window & input","Configuration"}}
+ local order={Overview={"Live dashboard","Activity & diagnostics"},Farm={"Team management","Buying filters","Locker automation"},Boosts={"Polisher","Potion permissions"},Market={"Inventory & Shop"},Training={"Selected Striker","Training queue","Roll controls","Grade & Trait targets"},Tower={"Stage & battle","Team selection"},Events={"Tournament","World collection","Collection filters","Missions"},Travel={"Movement mode","Route settings","Diagnostics"},Setting={"Appearance","Language","Window & input","Configuration"}}
  local function content(obj)
   local parts={obj.Name}
   if obj:IsA("TextLabel") or obj:IsA("TextButton") then parts[#parts+1]=obj.Text end
@@ -2027,9 +1944,8 @@ do (function()
    if key=="manualtowerteam" or key=="towerbest" then return "Team selection" end
    return "Stage & battle"
   elseif page=="Events" then
+    if key=="autotournament" or key:find("^tournament") then return "Tournament" end
    if key=="automissions" or key:find("^mission") then return "Missions" end
-   if key:find("grave") or key=="selectdiggingstriker" or key=="cleardiggingstriker" then return "Grave excavation" end
-   if key=="autozombie" or key:find("halloween") or text:find("halloween shop") then return "Trick-or-Treat" end
    if key:find("eventcategory") then return "Collection filters" end
    if key=="esp" or key=="events" or key=="mapcollect" or key=="autoobby" then return "World collection" end
   elseif page=="Travel" then
@@ -2114,7 +2030,7 @@ do (function()
   local slots=S.baseSlots local inv=S.inventoryCapacity and S.inventoryCapacity()
   metrics[1].Text=slots and ((slots.total-slots.empty).." / "..slots.total) or "—"
   metrics[2].Text=inv and (inv.count.." / "..inv.maximum) or "—"
-  local count=0 for _,key in {"autoEquip","strikerUpgrade","upgrades","polisher","autoSellCrates","autoSellPolishedCrates","polisherGoldenHourOnly","skinBuy","skinSell","skinEquip","grade","trait","tower","halloween","autoGrave","mapCollect","events","autoObby","rewards"} do if X[key] then count+=1 end end
+  local count=0 for _,key in {"autoEquip","strikerUpgrade","upgrades","polisher","autoSellCrates","autoSellPolishedCrates","polisherGoldenHourOnly","skinBuy","skinSell","skinEquip","grade","trait","tower","autoTournament","mapCollect","events","autoObby","rewards"} do if X[key] then count+=1 end end
   if config.autoBuy then count+=1 end if config.spawnBestLocker then count+=1 end if config.autoSellLockers then count+=1 end
   metrics[3].Text=tostring(count) metrics[4].Text=tostring(S.errors)
  end)
@@ -2467,7 +2383,7 @@ local function partBase(part)
 end
 local objectCache={}
 local failedPlacement={}
-local function canPlace(id) return id~=X.graveUnit and not S.reservedUnits[id] and not S.trainingQueueProtected[id] and G.BlueFarmSpareSale.pending~=id and os.clock()>=(failedPlacement[id] or 0) end
+local function canPlace(id) return not S.reservedUnits[id] and not S.tournamentProtected[id] and not S.trainingQueueProtected[id] and G.BlueFarmSpareSale.pending~=id and os.clock()>=(failedPlacement[id] or 0) end
 S.autoEquipScore=function(unit)
  return U.GetPlayerUnitCashPerDrop(P,{PlayerUnitName=unit.PlayerUnitName,PlayerUnitVariant=unit.Variant,PlayerUnitLevel=unit.Level or 1,PlayerUnitGrade=unit.Grade,PlayerUnitTrait=unit.Trait,PlayerUnitBallSkin=unit.BallSkin})
 end
@@ -2490,7 +2406,7 @@ S.autoEquipOccupant=function(part)
  for id,unit in D.GetData().PlayerUnits do
  if unit.Equipped and unit.PlayerUnitName==a.PlayerUnitName and (unit.Variant or "Normal")== (a.PlayerUnitVariant or "Normal") and (unit.Level or 1)==(a.PlayerUnitLevel or 1) and unit.Grade==a.PlayerUnitGrade and unit.Trait==a.PlayerUnitTrait and unit.BallSkin==a.PlayerUnitBallSkin then
  -- Favorite prevents selling, but does not lock a unit into its base slot.
- if S.reservedUnits[id] or S.trainingQueueProtected[id] then return id,true end
+ if S.reservedUnits[id] or S.tournamentProtected[id] or S.trainingQueueProtected[id] then return id,true end
  if not chosen or id<chosen then chosen=id end
  end
  end
@@ -2733,7 +2649,7 @@ task.spawn(function()
  local now=os.clock()
  local pickupReady=S.polisherPickupAllowed(part)
  if not pickupReady then S.ballCollectStatus=string.format("Waiting %.1fs before Polisher pickup",S.polisherPickupRemaining or 0) end
- if pickupReady and not S.graveOwnsInventory and not S.polisherFinishedWaiting and require(RS.Shared.Services.InventoryService).HasInventorySpace(P,1) and (X.autoSellCrates or S.polisherWantsCrates and S.polisherWantsCrates()) and (part:GetAttribute("PendingBallCount") or 0)>0 and now-pickupAt>=0.4 then
+ if pickupReady and not S.polisherFinishedWaiting and require(RS.Shared.Services.InventoryService).HasInventorySpace(P,1) and (X.autoSellCrates or S.polisherWantsCrates and S.polisherWantsCrates()) and (part:GetAttribute("PendingBallCount") or 0)>0 and now-pickupAt>=0.4 then
  pickupAt=now S.notePolisherPickup(part) R.PickupCrateBox:FireServer(part)
  end
  local crates=D.GetData().Crates
@@ -2810,7 +2726,7 @@ task.spawn(function()
  local candidate local protected=0
  for i=#ranked,11,-1 do
  local entry=ranked[i]
- if entry.id==X.graveUnit or S.reservedUnits[entry.id] or S.trainingQueueProtected[entry.id] or S.towerProtected[entry.id] or S.towerActiveUnits[entry.id] or U.IsPlayerUnitFavorited(P,entry.id) then protected+=1
+ if S.reservedUnits[entry.id] or S.trainingQueueProtected[entry.id] or S.towerProtected[entry.id] or (S.towerActiveUnits[entry.id] or S.tournamentProtected[entry.id]) or U.IsPlayerUnitFavorited(P,entry.id) then protected+=1
  elseif not sale.sent[entry.id] and not candidate then candidate=entry end
  end
  sale.protected=protected
@@ -2833,7 +2749,7 @@ task.spawn(function()
  local stillSurplus=false
  for i,entry in rankSpares() do if i>10 and entry.id==candidate.id then stillSurplus=true break end end
  local current=D.GetData().PlayerUnits[candidate.id]
- if S.running and S.enabled and X.sellSpareStrikers and stillSurplus and tool.Parent==character and character:FindFirstChildOfClass("Tool")==tool and current and not current.Equipped and candidate.id~=X.graveUnit and not S.reservedUnits[candidate.id] and not S.towerProtected[candidate.id] and not S.towerActiveUnits[candidate.id] and not U.IsPlayerUnitFavorited(P,candidate.id) and not sale.sent[candidate.id] then
+ if S.running and S.enabled and X.sellSpareStrikers and stillSurplus and tool.Parent==character and character:FindFirstChildOfClass("Tool")==tool and current and not current.Equipped and not S.reservedUnits[candidate.id] and not S.towerProtected[candidate.id] and not (S.towerActiveUnits[candidate.id] or S.tournamentProtected[candidate.id]) and not U.IsPlayerUnitFavorited(P,candidate.id) and not sale.sent[candidate.id] then
  -- Revalidate the exact held id on every attempt; sold ids stay guarded.
  sale.sent[candidate.id]=true sale.pending=candidate.id sale.status="Selling surplus striker"
  sale.attempts[candidate.id]=(sale.attempts[candidate.id] or 0)+1 sale.retryAt=os.clock()+5
@@ -3188,7 +3104,7 @@ S.workerHealth={}
 local function worker(name,period,fn)
  task.spawn(function()
  while alive() do
- if S.enabled or name=="Auto Grave" and S.graveSceneActive or name=="Training" and S.trainingTrip then
+ if S.enabled or name=="Training" and S.trainingTrip then
  local health=S.workerHealth[name] or {runs=0,errors=0} S.workerHealth[name]=health
  health.started=os.clock() health.active=true
  local ok,err=pcall(fn)
@@ -3200,6 +3116,223 @@ local function worker(name,period,fn)
  end
  end)
 end
+-- Auto Tournament owns only its own switches, native selections and timing input.
+do (function()
+ local state={status="OFF",matches=0,wins=0,decisions=0,perfectInputs=0,goodInputs=0,emergencyInputs=0,qteSeen=0,qtePressed=0,score={Your=0,Enemy=0},quarter=0}
+ S.tournament=state
+ local UI,Match,Field,Service,Mini,miniMaid
+ local active,field,equip,start,pendingPrompt,chooseCallback,inputCallback
+ local lastScan,lastAttempt,lastRender=0,0,0
+ local wheelToken,wheelHandled,submittedPrompt
+ local wheelStarted,wheelTurns,wheelPrevious,nextInputScan=0,0,0,0
+ local lastWon=(D.GetData().Tournament or {}).LastWonSeed
+ local function enabled()return alive() and S.enabled and X.autoTournament end
+ local function render()
+  if S.tournamentInfo and S.tournamentInfo.Parent then
+   S.tournamentInfo.Text=state.status.."\nScore: "..state.score.Your.." - "..state.score.Enemy.." • Quarter: "..state.quarter.." / 4\nMatches: "..state.matches.." • Wins confirmed: "..state.wins.."\nChoices: "..state.decisions.." • Perfect inputs: "..state.perfectInputs.." • Good: "..state.goodInputs
+  end
+ end
+ -- Same forward-pass / shot policy used in the comparative MCP trials.
+ S.tournamentChoose=function(sim)
+  local prompt=sim:GetPrompt()
+  if not prompt then return nil end
+  local best,bestValue=1,-math.huge
+  for i,option in prompt.Options do
+   local chance=sim:_applyPower(math.min(option.Chance*(X.tournamentPerfect and 1.25 or 1),0.95),"Your")
+   local value
+   if option.Kind=="Shoot" then value=chance*35
+   elseif option.Kind=="Pass" then
+    local target=sim._players[option.Target]
+    if target then
+     local distance=sim:_getDistanceToGoal(target)/sim._pitchScale
+     value=(option.Open and 1 or chance)*(40-distance)*0.7+(option.Utility or 0)*0.15
+    else value=-math.huge end
+   else value=chance*15 end
+   if value>bestValue then best,bestValue=i,value end
+  end
+  return best
+ end
+ local function initialize()
+  if UI then return true end
+  local classes=RS.Client.Core.Classes local modules=RS.Client.Core.Gui
+  if not classes:FindFirstChild("TournamentMatchClient") or not modules:FindFirstChild("TournamentGuiClient") then
+   state.status="Tournament is unavailable on this server" return false
+  end
+  if type(filtergc)~="function" then state.status="Tournament requires filtergc support" return false end
+  UI=require(modules.TournamentGuiClient)
+  Match=require(classes.TournamentMatchClient) Field=require(classes.SoccerFieldClient)
+  Service=require(RS.Shared.Services.TournamentService) Mini=require(modules.TournamentMinigameClient)
+  for _,value in debug.getupvalues(Mini.Play) do
+   if type(value)=="table" and type(rawget(value,"_tasks"))=="table" then miniMaid=value break end
+  end
+  assert(miniMaid,"Native Tournament timing state unavailable")
+  return true
+ end
+ local function bindMatch()
+  if not UI.IsInMatch() then
+   if active then active=nil pendingPrompt=nil chooseCallback=nil table.clear(S.tournamentProtected) end
+   return nil
+  end
+  if active and not active._Destroyed then return active end
+  local matches=filtergc("table",{Metatable=Match},false)
+  for _,candidate in matches do
+   if not candidate._Destroyed and candidate.Folder and candidate.Folder.Parent and candidate._sim then
+    active=candidate state.matches+=1 pendingPrompt=nil chooseCallback=nil
+    table.clear(S.tournamentProtected)
+    for id in candidate._guids do S.tournamentProtected[id]=true end
+    return active
+   end
+  end
+ end
+ local function findChoice(prompt,index)
+  local candidates=filtergc("function",{Constants={"HideLetters","Play"},Upvalues={prompt}},false)
+  for _,callback in candidates do
+   for _,value in debug.getupvalues(callback) do
+    if type(value)=="number" and value==index then return callback end
+   end
+  end
+ end
+ local function playWheel()
+  local screen=P.PlayerGui:FindFirstChild("TournamentSelectionGui")
+  local wheel=screen and screen:FindFirstChild("RotationMinigame")
+  local input=miniMaid and miniMaid._tasks.Input
+  if not wheel or not wheel.Visible or not input then
+   wheelToken=nil wheelHandled=false inputCallback=nil return
+  end
+  if not X.tournamentPerfect then return end
+  local target=wheel.PerfectZone.Rotation
+  local tick=wheel.RotatingTick.Rotation
+  if wheelToken~=input then
+   wheelToken=input wheelHandled=false inputCallback=nil
+   wheelStarted=os.clock() wheelTurns=0 wheelPrevious=tick
+   state.qteSeen+=1
+  end
+  if wheelHandled then return end
+  if tick+180<wheelPrevious then wheelTurns+=1 end
+  wheelPrevious=tick
+  if not inputCallback and os.clock()>=nextInputScan then
+   nextInputScan=os.clock()+0.2
+   -- Read the currently connected handler; old completed QTE closures are excluded.
+   if type(getconnections)=="function" then
+    for _,connection in getconnections(UIS.InputBegan) do
+     local callback=connection.Function
+     if type(callback)=="function" and connection.Enabled~=false then
+      local foundClick,foundPerfect=false,false
+      for _,value in debug.getconstants(callback) do
+       if value=="TournamentClick" then foundClick=true elseif value=="TournamentPerfect" then foundPerfect=true end
+      end
+      if foundClick and foundPerfect then inputCallback=callback break end
+     end
+    end
+   end
+   if not inputCallback then
+    for _,callback in filtergc("function",{Constants={"TournamentClick","TournamentPerfect"}},false) do
+     for _,value in debug.getupvalues(callback) do
+      if type(value)=="boolean" and value==false then inputCallback=callback break end
+     end
+     if inputCallback then break end
+    end
+   end
+  end
+  if inputCallback then
+   local angle=math.abs((tick-target+180)%360-180)
+   local elapsed=os.clock()-wheelStarted
+   -- Native QTE lasts three turns. Prefer Perfect on turns 1/2; take Good on turn 3.
+   local fallback=wheelTurns>=2 or elapsed>=1.85
+   if angle<=2.5 or fallback and angle<=30 or elapsed>=2.85 then
+    inputCallback({UserInputType=Enum.UserInputType.MouseButton1})
+    -- The game's handler clears Input after accepting a press. Do not count stale callbacks.
+    if miniMaid._tasks.Input~=input then
+     wheelHandled=true state.qtePressed+=1
+     if angle<=2.5 then state.perfectInputs+=1
+     elseif angle<=30 then state.goodInputs+=1 else state.emergencyInputs+=1 end
+    else inputCallback=nil nextInputScan=0 end
+   end
+  end
+ end
+ local function attemptStart()
+  if not X.tournamentAutoStart then state.status="Ready • Start a Tournament manually" return end
+  local seed=Service.GetSeed()
+  if (D.GetData().Tournament or {}).LastWonSeed==seed then
+   state.status="Won this rotation • Next opponent in "..math.ceil(Service.GetTimeUntilNextRotation()).."s" return
+  end
+  if os.clock()-lastAttempt<15 then return end
+  if S.nativeMenuRequested or S.selectingTraining or S.inventoryBusy or S.characterTaskBusy() then state.status="Waiting for current task" return end
+  lastAttempt=os.clock()
+  if not field or not field.Model or not field.Model.Parent then field=filtergc("table",{Metatable=Field},true) end
+  if not field then state.status="Waiting for Tournament field" return end
+  equip=equip or filtergc("function",{Constants={"You don't have any units!","TournamentUnitSlots"}},true)
+  start=start or filtergc("function",{Constants={"Your team is too weak to play!"}},true)
+  if not equip or not start then state.status="Tournament controls unavailable • Start manually" return end
+  state.status="Selecting best team • Starting Tournament"
+  local selection=P.PlayerGui:FindFirstChild("TournamentSelectionGui")
+  local main=selection and selection:FindFirstChild("UnitsSelectionMainFrame")
+  -- Open initializes the field geometry and excludes units already in a Tower.
+  if not main or not main.Visible then UI.Open(field) end
+  if not enabled() then return end
+  equip()
+  if not enabled() then return end
+  start()
+  if not UI.IsInMatch() then state.status="Start not confirmed • Check available team / game notice" end
+ end
+ S.tournamentStep=function()
+  if not initialize() then return end
+  local match=bindMatch()
+  local won=(D.GetData().Tournament or {}).LastWonSeed
+  if won~=lastWon then
+   if lastWon~=nil and type(won)=="number" and won>=0 then state.wins+=1 end
+   lastWon=won
+  end
+  if not enabled() then
+   state.status=not X.autoTournament and "OFF" or "PAUSED • Resume the script to continue"
+   return
+  end
+  if not match then attemptStart() return end
+  local sim=match._sim
+  state.score=table.clone(sim:GetScore()) state.quarter=sim:GetQuarter()
+  state.status="Playing • Forward passes / goal opportunities"
+  local prompt=sim:GetPrompt()
+  if prompt and submittedPrompt~=prompt then
+   if pendingPrompt~=prompt then pendingPrompt=prompt chooseCallback=nil lastScan=0 end
+   if not chooseCallback and os.clock()-lastScan>=0.5 then
+    lastScan=os.clock()
+    chooseCallback=findChoice(prompt,S.tournamentChoose(sim))
+   end
+   if chooseCallback then
+    local callback=chooseCallback chooseCallback=nil
+    -- Invoke the native option handler: it cleans the prompt and starts the real minigame.
+    callback() submittedPrompt=prompt state.decisions+=1
+   end
+  else pendingPrompt=nil chooseCallback=nil end
+ end
+ table.insert(connections,game:GetService("RunService").RenderStepped:Connect(function()
+  if active and enabled() and miniMaid then
+   local ok,err=pcall(playWheel)
+   if not ok and state.timingError~=tostring(err) then
+    state.timingError=tostring(err) S.errors+=1 S.lastError="Tournament timing: "..tostring(err)
+   end
+  end
+ end))
+ task.spawn(function()
+  while alive() do
+   if X.autoTournament or active then
+    local ok,err=pcall(S.tournamentStep)
+    if not ok then
+     local message=tostring(err)
+     if state.lastError~=message then S.errors+=1 S.lastError="Tournament: "..message end
+     state.lastError=message state.status="Tournament error • "..message
+     task.wait(2)
+    end
+   else state.status="OFF" end
+   if os.clock()-lastRender>=0.5 then lastRender=os.clock() render() end
+   if active and enabled() then task.wait(0.1) else task.wait(0.5) end
+  end
+  table.clear(S.tournamentProtected)
+ end)
+ table.insert(connections,gui.Destroying:Connect(function() active=nil table.clear(S.tournamentProtected) end))
+end)() end
+
+
 do (function()
  local module=RS.Shared.Services:FindFirstChild("MissionService")
  local libraryModule=RS.Shared.Core.Storage.Game:FindFirstChild("MissionLibrary")
@@ -3255,7 +3388,7 @@ do (function()
     readyCount+=1
     if record.attempts>=3 and not pending then row.status="Claim unconfirmed • Check mission menu" retryLimit=true end
     -- One outstanding claim per mission. Only server completion confirms it.
-    if X.autoMissions and S.enabled and remote and not pending and now>=record.nextAt and record.attempts<3 and not S.inventoryBusy and not S.nativeMenuRequested and not S.graveSceneActive and not S.halloweenSceneActive then
+    if X.autoMissions and S.enabled and remote and not pending and now>=record.nextAt and record.attempts<3 and not S.inventoryBusy and not S.nativeMenuRequested then
      record.attempts+=1 record.nextAt=now+4
      state.pending[id]={sentAt=now,seed=seed} state.requests+=1
      remote:FireServer(id) row.status="Confirming reward" waiting+=1
@@ -3327,7 +3460,7 @@ worker("Polisher",0.35,function()
   status.Polisher="Waiting for Golden Hour • Polished crates held"
  end
  S.polisherFinishedWaiting=canSellPolished and (part:GetAttribute("PolishedBallCount") or 0)>0
- if not S.graveOwnsInventory and canSellPolished and (part:GetAttribute("PolishedBallCount") or 0)>0 and INV.HasInventorySpace(P,1) and ready("polisherCollect",0.5) and S.polishedSalesAllowed() then R.CollectPolisherCrate:FireServer(part) end
+ if canSellPolished and (part:GetAttribute("PolishedBallCount") or 0)>0 and INV.HasInventorySpace(P,1) and ready("polisherCollect",0.5) and S.polishedSalesAllowed() then R.CollectPolisherCrate:FireServer(part) end
  if not X.polisher then return end
  
  local queue={}
@@ -3549,7 +3682,7 @@ S.pickTrainingUnit=function(nextOne)
  if S.trainingQueueState and S.trainingQueueState.running then status.Training="Stop Queue before changing Striker" return end
  if X.grade or X.trait then status.Training="ปิดการสุ่มก่อนเปลี่ยนตัว" return end
  local units={}
- for id,u in D.GetData().PlayerUnits do if id~=X.graveUnit and not u.Equipped and not S.towerProtected[id] and not S.towerActiveUnits[id] and not U.IsPlayerUnitFavorited(P,id) then table.insert(units,{id=id,score=unitBase(u)}) end end
+ for id,u in D.GetData().PlayerUnits do if not u.Equipped and not S.towerProtected[id] and not (S.towerActiveUnits[id] or S.tournamentProtected[id]) and not U.IsPlayerUnitFavorited(P,id) then table.insert(units,{id=id,score=unitBase(u)}) end end
  table.sort(units,function(a,b)if a.score==b.score then return a.id<b.id end return a.score>b.score end)
  if #units==0 then status.Training="ไม่มีตัวสำรอง • นำตัวออกจาก Base ก่อน" return end
  local index=1 if nextOne then for i,u in units do if u.id==X.unit then index=i%#units+1 break end end end
@@ -3602,12 +3735,12 @@ S.openTrainingPicker=function()
  if not frame then status.Training="ไม่พบหน้าเลือกตัวของเกม" restore() return end
  local picker=require(RS.Client.Core.Gui.SelectGuiClient)
  local excluded={}
- for id in D.GetData().PlayerUnits do if id==X.graveUnit or S.towerProtected[id] or S.towerActiveUnits[id] or U.IsPlayerUnitFavorited(P,id) or G.BlueFarmSpareSale.pending==id then excluded[id]=true end end
+ for id in D.GetData().PlayerUnits do if S.towerProtected[id] or (S.towerActiveUnits[id] or S.tournamentProtected[id]) or U.IsPlayerUnitFavorited(P,id) or G.BlueFarmSpareSale.pending==id then excluded[id]=true end end
  panel.Visible=false
  picker.Open(function(id)
  if not alive() then return end
  local unit=D.GetData().PlayerUnits[id]
- if id==X.graveUnit or not unit or unit.Equipped or S.towerProtected[id] or S.towerActiveUnits[id] or U.IsPlayerUnitFavorited(P,id) or G.BlueFarmSpareSale.pending==id then
+ if not unit or unit.Equipped or S.towerProtected[id] or (S.towerActiveUnits[id] or S.tournamentProtected[id]) or U.IsPlayerUnitFavorited(P,id) or G.BlueFarmSpareSale.pending==id then
  status.Training="ตัวนี้ไม่พร้อมเลือกแล้ว • กรุณาเปิด Select ใหม่" restore() return
  end
  table.clear(S.reservedUnits) X.unit=id S.reservedUnits[id]=true S.refreshSelectedUnit()
@@ -3627,7 +3760,7 @@ do (function()
  S.getBaseTrainingUnits=function()
   local rows={} local parts=baseParts()
   for id,u in D.GetData().PlayerUnits do
-   if u.Equipped and not U.IsPercentageUnit(u.PlayerUnitName) and id~=X.graveUnit and not S.towerActiveUnits[id] then
+   if u.Equipped and not U.IsPercentageUnit(u.PlayerUnitName) and not (S.towerActiveUnits[id] or S.tournamentProtected[id]) then
     for _,part in parts do if matches(part,u) then table.insert(rows,{id=id,unit=u,part=part,score=S.autoEquipScore(u)}) break end end
    end
   end
@@ -3779,7 +3912,7 @@ do (function()
   if not u or U.IsPercentageUnit(u.PlayerUnitName) then q.status="Select an eligible base Striker first" return false end
   local inBase=S.trainingBaseUnit==id
   for _,entry in S.getBaseTrainingUnits() do if entry.id==id then inBase=true break end end
-  if u.Equipped and not inBase or id==X.graveUnit or S.towerActiveUnits[id] then q.status="This Striker is unavailable for the queue" return false end
+  if u.Equipped and not inBase or (S.towerActiveUnits[id] or S.tournamentProtected[id]) then q.status="This Striker is unavailable for the queue" return false end
   if not S.hasSelectedTargets(X.gradeTargets) or not S.hasSelectedTargets(X.traitTargets) then q.status="Choose both Grade and Trait targets before adding" return false end
   for i,entry in X.trainingQueue do if entry.id==id then
    entry.grades=table.clone(X.gradeTargets) entry.traits=table.clone(X.traitTargets)
@@ -3838,7 +3971,7 @@ do (function()
   if mode=="base" then
    for _,entry in S.getBaseTrainingUnits() do allowed[entry.id]=true end
   else
-   for id,u in D.GetData().PlayerUnits do if not u.Equipped and not U.IsPercentageUnit(u.PlayerUnitName) and id~=X.graveUnit and not S.towerActiveUnits[id] then allowed[id]=true end end
+   for id,u in D.GetData().PlayerUnits do if not u.Equipped and not U.IsPercentageUnit(u.PlayerUnitName) and not (S.towerActiveUnits[id] or S.tournamentProtected[id]) then allowed[id]=true end end
   end
   for _,entry in X.trainingQueue do allowed[entry.id]=nil end
   if not next(allowed) then q.status=mode=="base" and "No unqueued Strikers in your base" or "No unqueued Strikers outside your base" return end
@@ -3897,7 +4030,7 @@ end)() end
 
 worker("Training",0.02,function()
  if S.trainingQueueTick then S.trainingQueueTick() end
- if S.trainingTrip and (not S.enabled or not X.grade and not X.trait or X.unit~=S.trainingTrip.unit or P.Character~=S.trainingTrip.char or S.halloweenHasPriority()) then S.finishTrainingTrip() end
+ if S.trainingTrip and (not S.enabled or not X.grade and not X.trait or X.unit~=S.trainingTrip.unit or P.Character~=S.trainingTrip.char) then S.finishTrainingTrip() end
  if not S.enabled or S.nativeMenuRequested or S.selectingTraining then return end
  if type(S.checkCollectionGround)~="function" or type(S.returnTrainingSafe)~="function" then return end
  -- Rerolls do not use the character or equipped tool. Only station travel
@@ -3950,7 +4083,7 @@ worker("Training",0.02,function()
  if type(cost)~="number" or cost<0 or cost==math.huge or cost>(D.GetData().Currency.Cash or 0) then X.grade=false S.trainingStops.grade="Not enough cash" status.Training="เงินไม่พอสุ่ม Grade" continue end
  end
  local needsTravel=not GS.CanReachRollStation(P,service.HITBOX_TAG)
- if needsTravel and (S.tpReturnActive or S.sharedTravelActive or S.halloweenTravel or S.halloweenSceneActive or S.graveTravel or S.graveSceneActive or S.obbyTravel or S.shopOpen or S.halloweenHasPriority()) then
+ if needsTravel and (S.tpReturnActive or S.sharedTravelActive or S.obbyTravel or S.shopOpen) then
   status.Training=token.." • Waiting for station travel; Auto remains ON" continue
  end
  if needsTravel and not X.trainingTP then
@@ -3988,7 +4121,7 @@ worker("Training",0.02,function()
  if not origin or not destination then status.Training="No safe station travel point" return end
  trip={char=char,root=root,human=human,unit=id,origin=S.trainingTrip and S.trainingTrip.origin or CFrame.new(origin)*root.CFrame.Rotation}
  status.Training=X.collectMode.." • Travelling to roll station"
- local travelled=S.travelTo and S.travelTo(CFrame.new(destination)*root.CFrame.Rotation,function()return alive() and X[kind] and not S.halloweenHasPriority() and X.unit==id and P.Character==char end,true)
+ local travelled=S.travelTo and S.travelTo(CFrame.new(destination)*root.CFrame.Rotation,function()return alive() and X[kind] and X.unit==id and P.Character==char end,true)
  if not travelled then status.Training="No safe route to rolling station" return end
  local arrived=waitFor(function()return P.Character~=char or (GS.IsInRollRange(P,service.HITBOX_TAG) and (root.Position-destination).Magnitude<8) end,1.2,0.01)
  if not arrived or not alive() or not S.enabled or not X[kind] or P.Character~=char or human.Health<=0 or not GS.CanReachRollStation(P,service.HITBOX_TAG) then status.Training="Station travel cancelled or out of range" return end
@@ -4090,7 +4223,6 @@ S.pickTowerSlot=function(slot)
  for i,id in X.towerTeam do if i~=slot then excluded[id]=true end end
  for id in S.reservedUnits do excluded[id]=true end
  for id in S.trainingQueueProtected do excluded[id]=true end
- if X.graveUnit~="" then excluded[X.graveUnit]=true end
  if G.BlueFarmSpareSale.pending then excluded[G.BlueFarmSpareSale.pending]=true end
  panel.Visible=false
  require(RS.Client.Core.Gui.SelectGuiClient).Open(function(id)
@@ -4127,14 +4259,14 @@ worker("Tower",3,function()
  local team={}
  if X.towerBest then
  local battle=require(RS.Shared.Services.InfinityTowerBattleService)
- local units={} for id in D.GetData().PlayerUnits do if id~=X.graveUnit and not S.reservedUnits[id] then table.insert(units,{id=id,score=battle.GetDamageFromCashPerDrop(U.GetDamageBasis(P,id))*battle.GetHealthFromCashPerDrop(U.GetHealthBasis(P,id))}) end end
+ local units={} for id in D.GetData().PlayerUnits do if not S.reservedUnits[id] and not S.tournamentProtected[id] then table.insert(units,{id=id,score=battle.GetDamageFromCashPerDrop(U.GetDamageBasis(P,id))*battle.GetHealthFromCashPerDrop(U.GetHealthBasis(P,id))}) end end
  table.sort(units,function(a,b)if a.score==b.score then return a.id<b.id end return a.score>b.score end)
  for i=1,math.min(#units,require(RS.Shared.Constants).InfinityTowerUnitSlots) do table.insert(team,units[i].id) end
  else
  local seen={}
  for i=1,require(RS.Shared.Constants).InfinityTowerUnitSlots do
  local id=X.towerTeam[i]
- if id and id~=X.graveUnit and D.GetData().PlayerUnits[id] and not seen[id] and not S.reservedUnits[id] then table.insert(team,id) seen[id]=true end
+ if id and D.GetData().PlayerUnits[id] and not seen[id] and not S.reservedUnits[id] and not S.tournamentProtected[id] then table.insert(team,id) seen[id]=true end
  end
  end
  if #team==0 then status.Tower="ยังไม่ได้เลือกทีมหอคอย" return end
@@ -4273,28 +4405,11 @@ end
 table.insert(connections,R.ItemRainRemoved.OnClientEvent:Connect(function(id) confirmPickup("rain:"..tostring(id)) end))
 local function enabledTarget(c)
  if c.kind=="map" then return X.mapCollect and (S.variantCatalog[c.name] and X.collectVariants or X.collectItems)[c.name]~=false end
- if c.kind=="variant" then return (X.events or X.halloween or X.autoGrave) and X.eventKinds.variant~=false and X.collectVariants[c.name]~=false end
+ if c.kind=="variant" then return (X.events) and X.eventKinds.variant~=false and X.collectVariants[c.name]~=false end
  if not X.events then return false end
  return X.eventKinds.rain~=false and (S.variantCatalog[c.name] and X.collectVariants or X.collectItems)[c.name]~=false
 end
 S.isCollectionTargetEnabled=enabledTarget
--- Only occupied, selected and currently collectable Variant Tokens interrupt Halloween.
-S.variantTokenHasPriority=function()
- if not S.enabled or not (X.halloween or X.autoGrave) then return false end
- local root=P.Character and P.Character:FindFirstChild("HumanoidRootPart")
- if not root then return false end
- for _,node in CS:GetTagged("VariantTokenSpawn") do
-  if node:IsA("BasePart") and node:IsDescendantOf(workspace) and node:GetAttribute("Occupied")==true then
-   local name=node:GetAttribute("Variant")
-   local c={key=node,node=node,pos=node.Position,kind="variant",name=name,visual=S.pickupVisuals[node]}
-   if name and enabledTarget(c) and os.clock()>=(routeBlocked[node] or 0) then
-    local nearby=(root.Position-node.Position).Magnitude<=S.travelValue("travelRange")
-    if nearby or collect.walking and collect.variantNode==node or S.canTravelTarget(c) then return true end
-   end
-  end
- end
- return false
-end
 do
  S.eventDiscovery={placeVersion=game.PlaceVersion,status="Checking",schedule={},systems={}}
  S.scanEventStatus=function()
@@ -4304,7 +4419,7 @@ do
    local report=S.eventDiscovery
    local ok,err=pcall(function()
     report.systems={}
-    for name,remoteName in {Map="CollectCollectableObject",Variant="CollectVariantTokenSpawn",Rain="CollectItemRainItem",Obby="ClaimObbyBonus",Jackpot="JackpotSpin",Halloween="CollectCandyCorn"} do
+    for name,remoteName in {Map="CollectCollectableObject",Variant="CollectVariantTokenSpawn",Rain="CollectItemRainItem",Obby="ClaimObbyBonus",Jackpot="JackpotSpin"} do
      report.systems[name]=R:FindFirstChild(remoteName)~=nil
     end
     report.admin=RS.Shared.Services:FindFirstChild("AdminAbuseService")~=nil
@@ -4462,12 +4577,6 @@ local function safeReturn(frame,character,human,root)
  if not point then return false end
  S.recordTravel("emergency recovery",root.Position,point)
  S.travelSuspended=true S.travelSuspendReason="Unsupported or changed character position • Travel stopped"
- S.halloweenRecovery=nil
- if S.halloweenTravel and S.halloweenRouteName then
-  local ledger=G.BlueFarmHalloweenNightLedger
-  if ledger and ledger.blocked then ledger.blocked[S.halloweenRouteName]=os.clock()+math.max(10,S.travelValue("travelRetryDelay")) end
-  S.halloweenRecovery={route=S.halloweenRouteName,at=os.clock()}
- end
  S.nextTravelTP=math.max(S.nextTravelTP or 0,os.clock()+S.travelValue("collectTPDelay"))
  root.AssemblyLinearVelocity=Vector3.zero root.AssemblyAngularVelocity=Vector3.zero
  root.CFrame=CFrame.new(point)*frame.Rotation
@@ -4496,7 +4605,7 @@ do
   local busy=not root or not human or human.Health<=0 or root.Anchored or human.Sit
    or S.nativeMenuRequested or S.shopOpen or S.selectingTraining
    or S.sharedTravelActive or S.tpBusy or S.tpReturnActive or S.trainingTravel
-   or S.obbyTravel or S.halloweenTravel or S.graveTravel or S.graveSceneActive
+   or S.obbyTravel
    or char and char:FindFirstChild("KnockBodyPosition",true)
    or camera and camera.CameraType==Enum.CameraType.Scriptable
   if busy or manualControl() or not safeStanding(root.Position,char,human,root) then
@@ -4512,7 +4621,7 @@ do
   if #history>=3 then recovery.retryAt=history[1]+60 return end
   table.insert(history,now)
   S.lastTravelRecovery={at=now,reason=recovery.reason,respawned=recovery.character~=recovery.initialCharacter}
-  S.travelSuspended=false S.travelSuspendReason=nil S.halloweenRecovery=nil S.travelRecoveryState=nil
+  S.travelSuspended=false S.travelSuspendReason=nil S.travelRecoveryState=nil
  end)
 end
 S.checkCollectionGround=function(pos)
@@ -4540,7 +4649,7 @@ do
   local releaseCollision=function()end
   local mode=X.collectMode local tripStarted=os.clock()
   local function valid()
-   return not trip.cancelled and not ((S.halloweenTravel or S.zombieTravel) and not S.halloweenSceneActive and not S.graveSceneActive and S.variantTokenHasPriority and S.variantTokenHasPriority()) and not S.nativeMenuRequested and os.clock()-tripStarted<=S.travelValue("travelTimeout")+3 and alive() and S.enabled and G.BlueFarm==S and P.Character==char and root.Parent~=nil and human.Health>0 and not manualControl() and X.collectMode==mode and (not keepGoing or keepGoing())
+   return not trip.cancelled and not S.nativeMenuRequested and os.clock()-tripStarted<=S.travelValue("travelTimeout")+3 and alive() and S.enabled and G.BlueFarm==S and P.Character==char and root.Parent~=nil and human.Health>0 and not manualControl() and X.collectMode==mode and (not keepGoing or keepGoing())
   end
   local ok,result=pcall(function()
    if mode=="TP" then
@@ -4658,999 +4767,6 @@ S.stopCollectionTravel=function()
  if S.cancelSharedTravel then S.cancelSharedTravel() end
  stopWalking()
 end
-do
- (function()
- local module=RS.Shared.Services:FindFirstChild("HalloweenService")
- local service=module and require(module)
- local dayModule=RS.Shared.Services:FindFirstChild("DayNightService")
- local day=dayModule and require(dayModule)
- local currency="Halloween_2026"
- local sales={} local pickup local cornRows local handlers={} local attempts={} local houseGround={}
- local nextPick=0 local nextKnock=0 local nextScan=0
- local ledger=G.BlueFarmHalloweenNightLedger
- if type(ledger)~="table" or ledger.job~=game.JobId or ledger.user~=P.UserId then
-  ledger={job=game.JobId,user=P.UserId,night=false,visited={}}
-  G.BlueFarmHalloweenNightLedger=ledger
- end
- local visited=ledger.visited local lastWorkCorn=false
- ledger.blocked=ledger.blocked or {} ledger.recoveries=ledger.recoveries or 0
- ledger.cornGroups=ledger.cornGroups or {} ledger.sequence=ledger.sequence or 0
- ledger.confirmed=ledger.confirmed or {}
- local function syncNight()
-  local night=day and day.CanTrickOrTreat() or false
-  if night and (not ledger.night or ledger.expires and workspace:GetServerTimeNow()>ledger.expires+2) then table.clear(visited) table.clear(ledger.blocked) table.clear(ledger.cornGroups) table.clear(ledger.confirmed) ledger.nightStarted=workspace:GetServerTimeNow() ledger.sequence=0 ledger.recoveries=0 lastWorkCorn=false end
-  ledger.night=night
-  if night and type(day.GetSecondsUntilChange)=="function" then ledger.expires=workspace:GetServerTimeNow()+day.GetSecondsUntilChange() end
-  return night
- end
- syncNight()
- if day and type(day.GetNightChangedSignal)=="function" then
-  table.insert(connections,day.GetNightChangedSignal():Connect(syncNight))
- end
- local function nativeKnockDelay(house)
-  local delay=math.max(0,nextKnock-os.clock())
-  if debug and type(debug.getupvalues)=="function" then
-   local ok,values=pcall(debug.getupvalues,house._tryKnock)
-   if ok then
-    local now=workspace:GetServerTimeNow()
-    local cooldown=tonumber(require(RS.Shared.Constants).TrickOrTreat.KnockCooldown) or 5
-    for _,value in values do
-     if type(value)=="number" and value<=now and value>now-86400 then delay=math.max(delay,value+cooldown+0.01-now) end
-    end
-   end
-  end
-  return delay
- end
- -- Reserve a house before invoking its native knock, so delayed confirmation
- -- cannot cause a second knock in the same night. Failed routes remain retryable.
- S.chooseHalloweenHouse=function(candidates,done)
-  local selected local selectedBoss=false
-  for _,candidate in candidates do
-   if not done[candidate.name] then
-    local boss=service.IsBossHouse(candidate.name)
-    if not selected or boss and not selectedBoss or boss==selectedBoss and candidate.distance<selected.distance then
-     selected=candidate selectedBoss=boss
-    end
-   end
-  end
-  return selected
- end
- S.halloween={status="OFF",bagsCollected=0,bagsSold=0,cornCollected=0,housesKnocked=0,housesVisited=0,housesTotal=0,houseRound=1}
- local state=S.halloween
- local lastConfirmedKnocks=state.housesKnocked or 0
- local lastConfirmedCorn=state.cornCollected or 0
- S.noteHalloweenProgress=function()
-  local knocks=state.housesKnocked or 0 local corn=state.cornCollected or 0
-  if knocks>lastConfirmedKnocks or corn>lastConfirmedCorn then
-   -- Count consecutive route recoveries, not every recovery during the night.
-   ledger.recoveries=0
-   S.halloweenLastProgressAt=os.clock()
-  end
-  lastConfirmedKnocks=knocks lastConfirmedCorn=corn
- end
- local function eventData()return service and service.GetEventData(P)end
- local function balance()return tonumber(P:GetAttribute("Currency"..currency)) or 0 end
- S.refreshHalloweenHouseQueue=function()
-  local now=os.clock() local delay=math.max(10,S.travelValue("travelRetryDelay"))
-  for name,untilTime in ledger.blocked do
-   if untilTime==true then ledger.blocked[name]=now+delay
-   elseif type(untilTime)=="number" and now>=untilTime then ledger.blocked[name]=nil end
-  end
-  for name in visited do
-   if not (S.halloweenTravel and S.halloweenRouteName==name) and not service.IsHouseOnCooldown(P,name) then
-    visited[name]=nil
-   end
-  end
- end
- S.cornPickupHistory={}
- S.recordCornPickup=function(entry)
-  entry.at=os.clock() table.insert(S.cornPickupHistory,entry)
-  if #S.cornPickupHistory>40 then table.remove(S.cornPickupHistory,1) end
- end
- local function cornEnabled()return X.autoZombie or X.halloween and X.halloweenCorn or X.autoGrave and X.graveCollect end
- local function active()
-  return alive() and S.enabled and (X.autoZombie or X.halloween or X.autoGrave and X.graveCollect) and not (S.variantTokenHasPriority and S.variantTokenHasPriority()) and not manualControl()
- end
- local function refreshCornRows()
-  if cornRows then return cornRows end
-  local client=RS.Client.Core:FindFirstChild("CandyCornClient")
-  if not client or not debug or type(debug.getupvalues)~="function" then return nil end
-  local loaded,module=pcall(require,client)
-  if not loaded or type(module.Throw)~="function" then return nil end
-  local seen={}
-  local function findRows(fn,depth)
-   if seen[fn] or depth>4 then return nil end
-   seen[fn]=true
-   local ok,values=pcall(debug.getupvalues,fn)
-   if not ok or type(values)~="table" then return nil end
-   local named,name=pcall(function()return debug.info(fn,"n")end)
-   for _,value in values do
-    if type(value)=="table" then
-     -- removeCandyCorn owns the live registry, even while it is empty.
-     if named and name=="removeCandyCorn" then return value end
-     for id,row in value do
-      if type(id)=="string" and type(row)=="table" and typeof(row.Model)=="Instance" and row.Model.Name=="CandyCorn" and typeof(row.Position)=="Vector3" and type(row.Value)=="number" then return value end
-     end
-    end
-   end
-   for _,value in values do
-    if type(value)=="function" then
-     local found=findRows(value,depth+1)
-     if found then return found end
-    end
-   end
-  end
-  cornRows=findRows(module.Throw,0)
-  return cornRows
- end
- S.getHalloweenCornRows=refreshCornRows
- local function report()
-  local data=eventData()
-  local count=0 for _ in data and data.CandyBags or {} do count+=1 end
-  state.currency=balance() state.bags=count state.plotBags=data and data.PlotCandyBagAmount or 0
-  if S.halloweenInfo and S.halloweenInfo.Parent then
-   local night=day and day.CanTrickOrTreat()
-   local phase=day and type(day.GetSecondsUntilChange)=="function" and math.ceil(day.GetSecondsUntilChange()) or 0
-   S.halloweenInfo.Text=(not X.halloween and "Halloween OFF" or not S.enabled and "Halloween PAUSED" or state.status).."\nCandy: "..state.currency.." • Bags held: "..count.." • Plot bags: "..state.plotBags.."\nCollected: "..state.bagsCollected.." bags • Sold: "..state.bagsSold.." bags\nCandy Corn: "..state.cornCollected.." confirmed • Houses: "..state.housesKnocked.." confirmed\nDoors attempted tonight: "..state.housesVisited.." / "..state.housesTotal.."\n"..(night and "Night" or "Day").." • Next phase: "..phase.."s"
-  end
- end
- S.refreshHalloween=report
- local function bindHalloweenCharacter(character)
-  if S.halloweenKnockCharacter and S.halloweenKnockCharacter~=character then S.halloweenRespawnPending=true end
-  task.spawn(function()
-   local humanoid=character:WaitForChild("Humanoid",10)
-   if not humanoid or not alive() or P.Character~=character then return end
-   table.insert(connections,humanoid.Died:Connect(function()
-    if S.halloweenKnockCharacter~=character then return end
-    S.halloweenRespawnPending=true S.halloweenSceneActive=false nextKnock=0
-    state.status="Normal Trick-or-Treat outcome • Waiting to respawn"
-   end))
-  end)
- end
- table.insert(connections,P.CharacterAdded:Connect(bindHalloweenCharacter))
- if P.Character then bindHalloweenCharacter(P.Character) end
- S.canCollectHalloweenGroup=function(group,sequence,hasNextHouse,isNight,age)
-  local lifetime=tonumber(require(RS.Shared.Constants).CandyCorn.Lifetime) or 60
-  return group<sequence or not hasNextHouse or not isNight or type(age)=="number" and age>=math.max(0,lifetime-15)
- end
-
- -- Elevated drops need no standing footprint: remain anchored while collecting,
- -- then restore collision and character control only on the original safe floor.
- S.collectElevatedCorn=function(id,row,keepGoing)
-  local char=P.Character local root=char and char:FindFirstChild("HumanoidRootPart") local human=char and char:FindFirstChildOfClass("Humanoid")
-  if S.sharedTravelActive or not root or not human or human.Health<=0 or root.Anchored or human.Sit then return false,"Character busy" end
-  local ground=S.checkCollectionGround(root.Position)
-  if not ground then return false,"No safe return floor" end
-  local origin=CFrame.new(ground)*root.CFrame.Rotation local wasAnchored=root.Anchored local rotate=human.AutoRotate
-  local before=balance() local tween local hold local attachment local requestAnchored local mode=X.collectMode local tripStarted=os.clock()
-  local function valid()return alive() and S.enabled and P.Character==char and human.Health>0 and root.Parent and keepGoing()end
-  S.sharedTravelActive=true root.Anchored=true human.AutoRotate=false
-  local release=S.beginTravelNoclip(char)
-  local ok,result=pcall(function()
-   if not valid() or not row.Model:IsDescendantOf(workspace) then return false end
-   local destination=CFrame.new(row.Position+Vector3.new(0,1,0))*root.CFrame.Rotation
-   if mode=="TP" then
-    while os.clock()<(S.nextTravelTP or 0) do if not valid() then return false end task.wait(0.02) end
-    local from=root.Position char:PivotTo(destination*root.CFrame:ToObjectSpace(char:GetPivot()))
-    S.recordTravel("elevated Candy Corn TP",from,root.Position)
-    S.nextTravelTP=os.clock()+S.travelValue("collectTPDelay")
-   else
-    tween=game:GetService("TweenService"):Create(root,TweenInfo.new(math.max(0.02,(root.Position-destination.Position).Magnitude/S.travelValue("collectTweenSpeed")),Enum.EasingStyle.Linear),{CFrame=destination})
-    tween:Play() local deadline=os.clock()+S.travelValue("travelTimeout")
-    repeat task.wait(0.02) until not valid() or tween.PlaybackState~=Enum.PlaybackState.Playing or os.clock()>deadline
-    tween:Cancel() tween=nil
-   end
-   if not valid() or (root.Position-row.Position).Magnitude>4.8 then return false end
-   -- Hold position through physics, rather than leaving the local root anchored
-   -- during the server range check. Local optimistic VFX are not a receipt.
-   attachment=Instance.new("Attachment") attachment.Name="FyrelithCornAttachment" attachment.Parent=root
-   hold=Instance.new("AlignPosition") hold.Name="FyrelithCornHold" hold.Mode=Enum.PositionAlignmentMode.OneAttachment
-   hold.Attachment0=attachment hold.Position=destination.Position hold.MaxForce=1e7 hold.MaxVelocity=math.huge hold.Responsiveness=200 hold.RigidityEnabled=true hold.ApplyAtCenterOfMass=true hold.Parent=root
-   root.Anchored=wasAnchored root.AssemblyLinearVelocity=Vector3.zero root.AssemblyAngularVelocity=Vector3.zero
-   requestAnchored=root.Anchored
-   local settle=os.clock()+math.max(.25,S.travelValue("travelSettle"))
-   repeat if not valid() then return false end task.wait(.02) until os.clock()>=settle
-   local deadline=os.clock()+S.travelValue("pickupTimeout") local nextRequest=0
-   repeat
-    if not valid() or balance()-before>=math.max(1,tonumber(row.Value) or 1) then break end
-    if os.clock()>=nextRequest then R.CollectCandyCorn:FireServer(id) nextRequest=os.clock()+0.25 end
-    task.wait(0.02)
-   until os.clock()>deadline
-   waitFor(function()return balance()-before>=math.max(1,tonumber(row.Value) or 1) or P.Character~=char end,0.5)
-   return balance()-before>=math.max(1,tonumber(row.Value) or 1) and not row.Model:IsDescendantOf(workspace)
-  end)
-  if tween then tween:Cancel() end
-  if root.Parent and P.Character==char and human.Health>0 then root.Anchored=true end
-  if hold then hold:Destroy() end if attachment then attachment:Destroy() end
-  -- Return even if automation was paused or the item expired during approach.
-  local returnOK,returnError=pcall(function()
-  if root.Parent and P.Character==char and human.Health>0 then
-   if mode=="Tween" then
-    local duration=math.max(0.02,math.min(5,(root.Position-origin.Position).Magnitude/S.travelValue("collectTweenSpeed")))
-    local back=game:GetService("TweenService"):Create(root,TweenInfo.new(duration,Enum.EasingStyle.Linear),{CFrame=origin}) back:Play()
-    local deadline=os.clock()+duration+0.5
-    repeat task.wait(0.02) until P.Character~=char or human.Health<=0 or back.PlaybackState~=Enum.PlaybackState.Playing or os.clock()>deadline
-    back:Cancel()
-   end
-   if P.Character==char and human.Health>0 then
-    if (root.Position-origin.Position).Magnitude>0.5 then
-     local from=root.Position char:PivotTo(origin*root.CFrame:ToObjectSpace(char:GetPivot())) S.recordTravel("elevated Candy Corn return",from,root.Position)
-    end
-    lastSafe={character=char,frame=root.CFrame}
-   end
-  end
-  end)
-  release()
-  if root.Parent then root.Anchored=wasAnchored root.AssemblyLinearVelocity=Vector3.zero root.AssemblyAngularVelocity=Vector3.zero end
-  if human.Parent then human.AutoRotate=rotate end
-  S.sharedTravelActive=false
-  S.lastElevatedCorn={id=id,before=before,after=balance(),value=tonumber(row.Value),requestAnchored=requestAnchored,confirmed=ok and result==true,error=not ok and tostring(result) or not returnOK and tostring(returnError) or nil}
-  S.lastElevatedCorn.kind="elevated" S.recordCornPickup(S.lastElevatedCorn)
-  return ok and returnOK and result==true,not ok and tostring(result) or nil
- end
- worker("Halloween",0.05,function()
-  S.noteHalloweenProgress()
-  local night=syncNight()
-  S.refreshHalloweenHouseQueue()
-  local char=P.Character local root=char and char:FindFirstChild("HumanoidRootPart") local human=char and char:FindFirstChildOfClass("Humanoid")
-  S.halloweenSceneActive=char and char:FindFirstChild("KnockBodyPosition",true)~=nil or false
-  -- Native scenes retain ownership of their camera and character controls.
-  if workspace.CurrentCamera and workspace.CurrentCamera.CameraType==Enum.CameraType.Scriptable and S.halloweenKnockCharacter==char and nextKnock>0 and os.clock()<nextKnock+40 then S.halloweenSceneActive=true end
-  report()
-  if not service or not eventData() then state.status="Halloween unavailable on this server" return end
-  if not X.autoZombie and not X.halloween and not (X.autoGrave and X.graveCollect) then state.status="OFF" state.cornTravelReady=false S.graveCornPending=false return end
-  if not root or not human or human.Health<=0 then state.status=S.halloweenRespawnPending and "Normal Trick-or-Treat outcome • Waiting to respawn" or "Waiting for character" return end
-  if S.halloweenRespawnPending then
-   if char==S.halloweenKnockCharacter or root.Anchored or not safeStanding(root.Position,char,human,root) then state.status="Waiting for safe respawn" return end
-   S.halloweenRespawnPending=false S.halloweenSceneActive=false S.halloweenKnockCharacter=nil nextKnock=0
-   -- Shared recovery verifies stable ground before releasing any safety pause.
-   state.status="Respawned • Continuing Halloween queue"
-  end
-     if S.zombieHasPriority and S.zombieHasPriority() then state.status="Waiting for Auto Zombie" return end
-   if S.halloweenSceneActive then state.status="Waiting for native Trick-or-Treat scene" return end
-  if S.nativeMenuRequested then state.status="Waiting for game menu" return end
-  if S.variantTokenHasPriority() then state.status="Halloween paused • Collecting Variant Token first" state.cornTravelReady=false return end
-  if not active() then state.status="Paused by movement input" return end
-  local data=eventData() local now=os.clock()
-  for name,time in data.HouseKnocks or {} do
-   if ledger.nightStarted and type(time)=="number" and time>=ledger.nightStarted-1 then ledger.confirmed[name]=true end
-  end
-  local confirmedTonight=0 for _ in ledger.confirmed do confirmedTonight+=1 end
-  local goal=math.clamp(math.floor(tonumber(X.halloweenHouseGoal) or 43),1,84)
-  local goalReached=confirmedTonight>=goal and not X.halloweenFinishNight
-  state.confirmedTonight=confirmedTonight state.houseGoal=goal
-  for key,untilTime in attempts do if type(key)=="string" and untilTime<now-60 then attempts[key]=nil end end
-  for id in sales do
-   if not data.CandyBags[id] then state.bagsSold+=1 sales[id]=nil end
-  end
-  if not S.graveSceneActive and not S.graveTravel and X.halloween and X.halloweenSellBags and R:FindFirstChild("SellCandyBag") then
-   local sent=0
-   for id in data.CandyBags do
-    if sent>=3 then break end
-    if now>=(sales[id] or 0) and active() and X.halloweenSellBags then
-     sales[id]=now+0.6 R.SellCandyBag:FireServer(id) sent+=1
-    end
-   end
-  end
-  if pickup then
-   local newBag=false for id in data.CandyBags do if not pickup.ids[id] then newBag=true break end end
-   if newBag then state.bagsCollected+=1 pickup=nil
-   elseif now>=pickup.deadline then pickup=nil nextPick=now+1 end
-  end
-  if not S.graveSceneActive and not S.graveTravel and X.halloween and X.halloweenBags and not pickup and now>=nextPick and (data.PlotCandyBagAmount or 0)>0 and INV.HasInventorySpace(P,1) and R:FindFirstChild("PickupCandyBag") then
-   local home=plot() local part
-   for _,candidate in CS:GetTagged("ConveyorCandyCollectPart") do if home and candidate:IsDescendantOf(home) then part=candidate break end end
-   if part then
-    local ids={} for id in data.CandyBags do ids[id]=true end
-    pickup={ids=ids,deadline=now+2.5} nextPick=now+0.5
-    if active() and X.halloweenBags then R.PickupCandyBag:FireServer(part) end
-   end
-  end
-  -- Reconcile a bag before selling it, or a fast sale could hide pickup evidence.
-  if pickup then state.status="Confirming Candy Bag pickup" return end
-  if next(sales) then state.status="Confirming Candy Bag sale before Candy Corn" return end
-  if S.travelSuspended then
-   state.status="Travel recovery • Waiting for stable ground / retry cooldown"
-   return
-  end
-  if S.graveTravel or S.graveSceneActive or S.trainingTravel or S.obbyTravel or S.tpReturnActive or S.sharedTravelActive or S.selectingTraining or S.shopOpen or collect.walking then state.status="Waiting for another trip" return end
-  if root.Anchored or human.Sit then state.status="Waiting for character control" return end
-  if now>=nextScan and type(filtergc)=="function" then
-   nextScan=now+(S.mobileLite and 10 or 5) handlers={}
-   for _,handler in S.cachedHandlerTables({"HouseName","Model","KnockMaid","PlayerAttachment"}) do
-    if typeof(handler.Model)=="Instance" and handler.Model:IsDescendantOf(workspace) and type(handler._tryKnock)=="function" then table.insert(handlers,handler) end
-   end
-  end
-  local candidates={} local known={} local done=0 local total=0 local blocked=0
-  for _,handler in handlers do
-   if not handler._Destroyed and handler.Model.Parent and not known[handler.HouseName] then
-    known[handler.HouseName]=true total+=1
-    if visited[handler.HouseName] then done+=1 end
-    if ledger.blocked[handler.HouseName] and not visited[handler.HouseName] then blocked+=1 end
-    if X.halloween and not goalReached and night and X.halloweenHouses and not ledger.blocked[handler.HouseName] and not service.IsHouseOnCooldown(P,handler.HouseName) and now>=(attempts[handler.Model] or 0) then
-     local attachment=handler.PlayerAttachment
-     local candidate
-     if attachment then
-      local position=attachment.WorldPosition local cached=houseGround[handler.Model]
-      if not cached or now>=cached.expires or (cached.position-position).Magnitude>0.1 then
-       cached={position=position,point=S.checkCollectionGround(position),expires=now+5} houseGround[handler.Model]=cached
-      end
-      candidate=cached.point
-     end
-     if candidate then table.insert(candidates,{name=handler.HouseName,handler=handler,point=candidate,distance=(root.Position-candidate).Magnitude}) end
-    end
-   end
-  end
-  state.housesVisited=done state.housesTotal=total
-  state.housesSkipped=blocked
-  -- Hold the opening route briefly while the ready Admin House streams in.
-  -- Cooldown / blocked routes never prevent the rest of the night from running.
-  local adminName=require(RS.Shared.Constants).TrickOrTreat.BossHouseName
-  local adminReady=X.halloween and X.halloweenHouses and night and not goalReached
-   and not ledger.confirmed[adminName] and not service.IsHouseOnCooldown(P,adminName)
-   and not ledger.blocked[adminName]
-  if adminReady then
-   local opening=S.adminHouseOpening
-   if not opening or opening.night~=ledger.nightStarted then
-    opening={night=ledger.nightStarted,at=now} S.adminHouseOpening=opening
-    -- Invalidate the shared handler cache for this night's first house scan.
-    handlers={}
-    for _,handler in S.cachedHandlerTables({"HouseName","Model","KnockMaid","PlayerAttachment"}) do
-     if typeof(handler.Model)=="Instance" and handler.Model:IsDescendantOf(workspace) and type(handler._tryKnock)=="function" then table.insert(handlers,handler) end
-    end
-    nextScan=0
-   end
-   local present=false
-   for _,candidate in candidates do if candidate.name==adminName then present=true break end end
-   if not present and now-opening.at<10 then
-    state.status="Admin House first • Waiting for a safe door route"
-    return
-   end
-  end
-  local target=S.chooseHalloweenHouse(candidates,visited)
-  local house=target and target.handler local point=target and target.point
-  local knockDelay=house and nativeKnockDelay(house) or 0
-  state.knockCooldown=knockDelay
-  local rows=refreshCornRows()
-  local chosen,chosenId,distance,chosenGroup,chosenIsGrave
-  local pendingPrevious=0 local remainingCorn=0
-  for id in ledger.cornGroups do if not rows or not rows[id] then ledger.cornGroups[id]=nil end end
-  if cornEnabled() and rows then
-   for id,row in rows do
-    if type(row)=="table" and typeof(row.Model)=="Instance" and row.Model:IsDescendantOf(workspace) and typeof(row.Position)=="Vector3" then
-     remainingCorn+=1
-     ledger.cornGroups[id]=ledger.cornGroups[id] or ledger.sequence
-     local group=ledger.cornGroups[id]
-     local eligible=X.autoZombie or (X.halloween and X.halloweenCorn and knockDelay>0) or (X.autoGrave and X.graveCollect and S.graveDrops and S.graveDrops[id]) or S.canCollectHalloweenGroup(group,ledger.sequence,house~=nil,night,row.T)
-     local d=(root.Position-row.Position).Magnitude
-     if eligible and not ledger.blocked["corn:"..id] then
-      pendingPrevious+=1
-      local isGrave=X.autoGrave and X.graveCollect and S.graveDrops and S.graveDrops[id]==true
-      if now>=(attempts[id] or 0) and (not chosen or isGrave and not chosenIsGrave or isGrave==chosenIsGrave and (isGrave and d<distance or not isGrave and (group<chosenGroup or group==chosenGroup and d<distance))) then chosen=row chosenId=id distance=d chosenGroup=group chosenIsGrave=isGrave end
-     end
-    end
-   end
-  end
-  -- Once the server cooldown ends, knock the next unvisited door immediately.
-  -- During cooldown every landed group is eligible, including the latest house.
-  if not X.autoZombie and house and knockDelay<=0 and (service.IsBossHouse(house.HouseName) or not chosenIsGrave) then chosen=nil chosenId=nil end
-  S.graveCornPending=X.autoGrave and X.graveCollect and pendingPrevious>0
-  state.cornTravelReady=chosen~=nil
-  state.pendingPreviousCorn=pendingPrevious state.remainingCorn=remainingCorn state.houseSequence=ledger.sequence
-  if chosen then
-   lastWorkCorn=true
-   local origin=root.CFrame local before=balance()
-   local point
-   local approaches={Vector3.zero,Vector3.new(2,0,0),Vector3.new(-2,0,0),Vector3.new(0,0,2),Vector3.new(0,0,-2),Vector3.new(2,0,2),Vector3.new(-2,0,-2),Vector3.new(2,0,-2),Vector3.new(-2,0,2)}
-   local start=(state.cornApproach and state.cornApproach[chosenId] or 0)
-   state.cornApproach=state.cornApproach or {}
-   for step=1,#approaches do
-    local index=(start+step-1)%#approaches+1
-    local safe=S.checkCollectionGround(chosen.Position+approaches[index])
-    if safe and (safe-chosen.Position).Magnitude<=4.8 then point=safe state.cornApproach[chosenId]=index break end
-   end
-   if point then
-    local sum=Vector3.zero local count=0
-    for _,row in rows do if typeof(row.Position)=="Vector3" and (row.Position-chosen.Position).Magnitude<=7 then sum+=row.Position count+=1 end end
-    if count>1 then
-     local centre=S.checkCollectionGround(sum/count)
-     if centre and (centre-chosen.Position).Magnitude<=4.8 then
-      local oldCount,newCount=0,0
-      for _,row in rows do if typeof(row.Position)=="Vector3" then if (row.Position-point).Magnitude<=4.8 then oldCount+=1 end if (row.Position-centre).Magnitude<=4.8 then newCount+=1 end end end
-      if newCount>oldCount then point=centre end
-     end
-    end
-   end
-   if not point then
-    S.halloweenTravel=true S.halloweenRouteName="corn:"..chosenId S.stopCollectionTravel()
-    state.status="Collecting elevated Candy Corn • "..X.collectMode
-    local collected,reason=S.collectElevatedCorn(chosenId,chosen,function()return active() and cornEnabled() and P.Character==char end)
-    S.halloweenTravel=false S.halloweenRouteName=nil attempts[chosenId]=os.clock()+0.5
-    if collected then state.cornCollected+=1 if S.graveDrops[chosenId] then S.graveDropReceipts[chosenId]=true end end
-    state.status=collected and "Elevated Candy Corn confirmed • Returned to ground" or "Elevated pickup retry • "..tostring(reason or "Waiting for confirmation")
-    return
-   end
-   S.halloweenTravel=true S.halloweenRouteName="corn:"..chosenId S.stopCollectionTravel()
-   local ok,err=pcall(function()
-    local finish local nextRequest=0
-    local batch={[chosenId]=chosen} local counted={} local credited=0
-    for id,row in rows do if row.Model and row.Model:IsDescendantOf(workspace) and typeof(row.Position)=="Vector3" and (row.Position-point).Magnitude<=4.8 then batch[id]=row end end
-    local lifetime=tonumber(require(RS.Shared.Constants).CandyCorn.Lifetime) or 60
-    local function updateBatchReceipts()
-     local current=S.getHalloweenCornRows() or {}
-     for id,entry in batch do
-      local value=tonumber(entry.Value)
-      -- A shared balance increase must cover each reward separately. Expiring
-      -- visuals and unrelated rewards cannot confirm an entire batch at once.
-      if not counted[id] and value and value>0 and (tonumber(entry.T) or lifetime)<lifetime-1 and (not current[id] or not entry.Model:IsDescendantOf(workspace)) and balance()-before-credited>=value then
-       credited+=value counted[id]=true state.cornCollected+=1
-       S.lastCornReceipt={id=id,value=value,before=before,after=balance(),credited=credited}
-       if S.graveDrops and S.graveDrops[id] then S.graveDropReceipts[id]=true end
-      end
-     end
-    end
-    local function continuing()return active() and cornEnabled() and P.Character==char and chosen.Model:IsDescendantOf(workspace) and rows[chosenId]==chosen end
-    if (root.Position-point).Magnitude>0.75 then
-     local travelled=S.travelTo(CFrame.new(point)*root.CFrame.Rotation,function()
-      return active() and cornEnabled() and P.Character==char and (tonumber(chosen.T) or lifetime)<lifetime-1
-     end)
-     if not travelled then
-      if active() and cornEnabled() and chosen.Model:IsDescendantOf(workspace) then
-       state.status="Trying elevated Candy Corn route"
-       S.collectElevatedCorn(chosenId,chosen,function()return active() and cornEnabled() and P.Character==char end)
-      end
-      waitFor(function()return balance()>before or P.Character~=char end,0.5)
-      updateBatchReceipts()
-      if next(counted) then state.status="Candy Corn confirmed" else state.status="No safe Candy Corn route" end
-      S.recordCornPickup({kind="ground route cancelled",before=before,after=balance(),modelPresent=chosen.Model:IsDescendantOf(workspace),confirmed=next(counted)~=nil})
-      return
-     end
-    end
-    finish=os.clock()+math.max(0.8,math.min(2,S.travelValue("pickupTimeout")))
-    repeat
-     if not active() or P.Character~=char then break end
-     updateBatchReceipts()
-     if os.clock()>=nextRequest then
-      for id,row in S.getHalloweenCornRows() or {} do
-       if row.Model and row.Model:IsDescendantOf(workspace) and typeof(row.Position)=="Vector3" and (root.Position-row.Position).Magnitude<=4.8 then
-        local allowed=(S.graveDrops and S.graveDrops[id] and X.autoGrave and X.graveCollect) or X.halloween and X.halloweenCorn
-        if allowed then batch[id]=row end
-       end
-      end
-      -- Retry snapshot IDs as well: disappearance of the optimistic local visual
-      -- is not server acknowledgement and must not cancel the actual pickup.
-      for id,row in batch do
-       if not counted[id] and typeof(row.Position)=="Vector3" and (root.Position-row.Position).Magnitude<=4.8 and (tonumber(row.T) or lifetime)<lifetime-1 then R.CollectCandyCorn:FireServer(id) end
-      end
-      nextRequest=os.clock()+math.max(0.1,math.min(0.25,S.travelValue("pickupRetry")))
-     end
-     local remaining=false
-     for id,entry in batch do if not counted[id] and (tonumber(entry.T) or lifetime)<lifetime-1 then remaining=true break end end
-     if not remaining then break end
-     task.wait(0.02)
-    until os.clock()>=finish
-    -- One shared replication wait covers all nearby requests.
-    waitFor(function()return balance()>before or P.Character~=char end,0.12)
-    updateBatchReceipts()
-    local requested,confirmed=0,0 for _ in batch do requested+=1 end for _ in counted do confirmed+=1 end
-    S.lastCornPickup={kind="ground",before=before,after=balance(),credited=credited,requested=requested,confirmed=confirmed}
-    S.recordCornPickup(S.lastCornPickup)
-    if confirmed==requested then state.status="Nearby Candy Corn collected"
-    elseif confirmed>0 then state.status="Candy Corn partly confirmed • "..confirmed.." / "..requested
-    else state.status="Candy Corn not received • Server did not confirm" end
-   end)
-   attempts[chosenId]=os.clock()+0.5
-   local shouldReturn=not house and not chosenIsGrave and X.halloweenReturn and (X.collectMode=="TP" and X.collectReturnTP or X.collectMode=="Tween" and X.collectReturnTween)
-   if shouldReturn and P.Character==char and human.Health>0 then S.returnTrainingSafe(origin) end
-   S.halloweenTravel=false S.halloweenRouteName=nil
-   if not ok then error(err) end
-   return
-  end
-  if pendingPrevious>0 and not house then state.status="Collecting previous house Candy Corn • Waiting for pickup retry" return end
-  if goalReached then state.status=confirmedTonight.." / "..goal.." houses confirmed • "..(remainingCorn==0 and "No remaining landed Candy Corn; waiting for next night" or "Remaining Candy Corn is blocked / outside enabled travel range") return end
-  if not X.halloween or not X.halloweenHouses then state.status="Waiting for Candy Corn" return end
-  if not day or not day.CanTrickOrTreat() then state.status="Trick-or-Treat: waiting for night" return end
-  if not house then
-   state.status=state.housesTotal==0 and "Waiting for house clients" or state.housesVisited>=state.housesTotal and "All doors on cooldown • Waiting for a ready house or dawn" or state.housesVisited+blocked>=state.housesTotal and "Remaining doors have blocked routes • Waiting for next night" or "Unvisited doors: waiting for cooldown / safe route"
-   return
-  end
-  lastWorkCorn=false
-  local origin=root.CFrame local before=(eventData().HouseKnocks or {})[house.HouseName]
-  S.halloweenTravel=true S.halloweenRouteName=house.HouseName S.stopCollectionTravel()
-  local ok,err=pcall(function()
-   if not S.travelTo(CFrame.new(point)*root.CFrame.Rotation,function()return active() and X.halloweenHouses and not house._Destroyed and P.Character==char end) then
-    if active() and X.halloweenHouses and P.Character==char then ledger.blocked[house.HouseName]=os.clock()+math.max(10,S.travelValue("travelRetryDelay")) end
-    state.status="Skipped or cancelled house route: "..tostring(house.HouseName) return
-   end
-   while nativeKnockDelay(house)>0 do
-    if X.halloweenCorn then
-     for _,row in S.getHalloweenCornRows() or {} do
-      if type(row)=="table" and typeof(row.Model)=="Instance" and row.Model:IsDescendantOf(workspace) and typeof(row.Position)=="Vector3" then
-       state.status="Knock cooldown • Collecting landed Candy Corn"
-       state.cooldownHarvestYields=(state.cooldownHarvestYields or 0)+1
-       return
-      end
-     end
-    end
-    if not active() or not X.halloweenHouses or P.Character~=char or not day.CanTrickOrTreat() then return end
-    state.status="At next door • Waiting for server knock cooldown" task.wait(0.02)
-   end
-   if not active() or not X.halloweenHouses or not day.CanTrickOrTreat() or service.IsHouseOnCooldown(P,house.HouseName) then return end
-   local door=house.DoorRig and house.DoorRig.PrimaryPart
-   if not door or (root.Position-door.Position).Magnitude>20 then state.status="House out of knock range" return end
-   nextKnock=os.clock()+math.max(0,tonumber(require(RS.Shared.Constants).TrickOrTreat.KnockCooldown) or 5)+0.01
-   if visited[house.HouseName] then return end
-   visited[house.HouseName]=true state.housesVisited+=1
-   ledger.sequence+=1
-   S.halloweenKnockCharacter=char
-   house:_tryKnock()
-   if waitFor(function()return not eventData() or (eventData().HouseKnocks or {})[house.HouseName]~=before or P.Character~=char end,2) and eventData() and (eventData().HouseKnocks or {})[house.HouseName]~=before then
-    state.housesKnocked+=1
-    ledger.confirmed[house.HouseName]=true
-    state.status="House knock confirmed: "..tostring(house.HouseName)
-    state.lastHouseResult=state.status
-   else
-    state.lastHouseResult="No server confirmation: "..tostring(house.HouseName).." • Rechecking after cooldown"
-    state.status=state.lastHouseResult
-   end
-   local finish=os.clock()+45
-   while P.Character==char and human.Health>0 and os.clock()<finish do
-    local camera=workspace.CurrentCamera
-    if not char:FindFirstChild("KnockBodyPosition",true) and (not camera or camera.CameraType~=Enum.CameraType.Scriptable) then break end
-    task.wait(0.1)
-   end
-  end)
-  if visited[house.HouseName] or ledger.blocked[house.HouseName] then attempts[house.Model]=os.clock()+math.max(10,S.travelValue("travelRetryDelay")) end
-  S.halloweenTravel=false S.halloweenRouteName=nil
-  if not S.halloweenRespawnPending and S.halloweenKnockCharacter==char then S.halloweenKnockCharacter=nil end
-  if not ok then error(err) end
- end)
- end)()
-end
-
--- Auto Zombie: shares the existing travel controller; never interrupts a native scene.
-do (function()
- local waveModule=RS.Shared.Services:FindFirstChild("ZombieWaveService")
- if not waveModule then
-  S.zombie={status="Zombie system unavailable",attempts=0,removed=0,unconfirmed=0}
-  if S.zombieInfo then S.zombieInfo.Text="Zombie system unavailable on this server" end
-  return
- end
- local loaded,wave=pcall(require,waveModule)
- if not loaded or type(wave)~="table" or type(wave.IsWaveActive)~="function" then
-  S.zombie={status="Zombie module could not load",attempts=0,removed=0,unconfirmed=0}
-  if S.zombieInfo then S.zombieInfo.Text="Zombie module could not load" end
-  return
- end
- local state={status="OFF",attempts=0,removed=0,unconfirmed=0}
- S.zombie=state
-
- -- Client observations only: counts can be incomplete due to streaming or late attachment.
- local ledger=G.BlueFarmZombieLedger
- if not ledger or ledger.session~=game.JobId then
-  ledger={session=game.JobId,history={},sequence=0} G.BlueFarmZombieLedger=ledger
- end
- S.zombieLedger=ledger
- local function counts()return {seen=0,attempted=0,requests=0,removed=0,failed=0}end
- local function summary(w)
-  return {id=w.id,observedAt=w.observedAt,endsAt=w.endsAt,finishedAt=w.finishedAt,partial=w.partial,
-   normal=w.normal,king=w.king,reasons=w.reasons,lastObservedRemaining=w.lastObservedRemaining,
-   remainingSampleAt=w.remainingSampleAt,remainingAtEnd=w.remainingAtEnd,events=w.events,
-   evidence=w.evidence,rewardConfirmed=0,rewardProof="No zombie-specific server receipt available"}
- end
- S.getZombieReport=function()
-  local out={session=ledger.session,current=ledger.current and summary(ledger.current),history={}}
-  for _,w in ledger.history do table.insert(out.history,summary(w)) end
-  return out
- end
- local function event(reason,model,extra,owner)
-  local w=owner or ledger.current if not w then return end
-  w.reasons[reason]=(w.reasons[reason] or 0)+1
-  table.insert(w.events,{at=workspace:GetServerTimeNow(),reason=reason,kind=model and model.Name or nil,detail=extra})
-  if #w.events>100 then table.remove(w.events,1) end
- end
- local function bucket(w,model)return model.Name=="SpawnedKingZombie" and w.king or w.normal end
- local function observe()
-  local now=workspace:GetServerTimeNow()
-  local active=wave.IsWaveActive()
-  local w=ledger.current
-  if active and not w then
-   ledger.sequence+=1
-   w={id=ledger.sequence,observedAt=now,endsAt=wave.GetWaveEndsAt(),partial=true,
-    normal=counts(),king=counts(),reasons={},events={},evidence={},seen=setmetatable({},{__mode="k"}),attempted=setmetatable({},{__mode="k"})}
-   -- partial=true deliberately avoids claiming all server spawns were visible.
-   ledger.current=w
-  end
-  if not w then return end
-  if active then
-   w.endsAt=wave.GetWaveEndsAt()
-   local normal,king=0,0
-   for _,m in CS:GetTagged("SpawnedZombie") do
-    if m:IsDescendantOf(workspace) and wave.GetZombieData(m.Name) then
-     if not w.seen[m] then w.seen[m]=true bucket(w,m).seen+=1 end
-     if m.Name=="SpawnedKingZombie" then king+=1 else normal+=1 end
-    end
-   end
-   w.lastObservedRemaining={normal=normal,king=king,total=normal+king}
-   w.remainingSampleAt=now
-  else
-   -- Despawning at wave end is not evidence that all zombies were collected.
-   w.finishedAt=now w.remainingAtEnd={normal=0,king=0,total=0}
-   for _,m in CS:GetTagged("SpawnedZombie") do
-    if m:IsDescendantOf(workspace) and wave.GetZombieData(m.Name) then
-     local k=m.Name=="SpawnedKingZombie" and "king" or "normal"
-     w.remainingAtEnd[k]+=1 w.remainingAtEnd.total+=1
-    end
-   end
-   table.insert(ledger.history,w) if #ledger.history>20 then table.remove(ledger.history,1) end
-   ledger.current=nil
-  end
- end
- -- Independent observer continues during master pause, menus, travel and toggle OFF.
- task.spawn(function()
-  while alive() do
-   local ok,err=pcall(observe)
-   if not ok then state.observerError=tostring(err) end
-   task.wait(0.2)
-  end
- end)
-
- local retry=setmetatable({},{__mode="k"})
- local failures=setmetatable({},{__mode="k"})
- -- Conservative wait on first use; retained across script reloads.
- if G.BlueFarmZombieSession~=game.JobId then
-  G.BlueFarmZombieSession=game.JobId G.BlueFarmZombieReadyAt=os.clock()+120
- end
- G.BlueFarmZombieReadyAt=G.BlueFarmZombieReadyAt or (os.clock()+120)
- local function targetRows()
-  local root=P.Character and P.Character:FindFirstChild("HumanoidRootPart")
-  local rows={}
-  if not root then return rows end
-  for _,model in CS:GetTagged("SpawnedZombie") do
-   local part=model:FindFirstChild("HumanoidRootPart")
-   if model:IsDescendantOf(workspace) and part and part:IsA("BasePart") and wave.GetZombieData(model.Name) and os.clock()>=(retry[model] or 0) then
-    table.insert(rows,{model=model,part=part,king=model.Name=="SpawnedKingZombie",distance=(root.Position-part.Position).Magnitude})
-   end
-  end
-  table.sort(rows,function(a,b) if a.king~=b.king then return a.king end return a.distance<b.distance end)
-  return rows
- end
- local candyGraceUntil=0
- local function candyPending()
-  if os.clock()<candyGraceUntil then return true end
-  if not S.getHalloweenCornRows then return false end
-  for _,row in S.getHalloweenCornRows() or {} do
-   if type(row)=="table" and typeof(row.Model)=="Instance" and row.Model:IsDescendantOf(workspace) then return true end
-  end
-  return false
- end
- local function zombieReady()
-  local row=targetRows()[1]
-  return row and (row.king or not candyPending()) or false
- end
- S.zombieHasPriority=function()
-  return S.enabled and X.autoZombie and not (S.variantTokenHasPriority and S.variantTokenHasPriority()) and type(fireproximityprompt)=="function" and not S.nativeMenuRequested and not manualControl() and (S.zombieTravel or os.clock()>=G.BlueFarmZombieReadyAt and wave.IsWaveActive() and zombieReady()) or false
- end
- local function report()
-  if S.zombieInfo and S.zombieInfo.Parent then
-   S.zombieInfo.Text="Auto Zombie • "..state.status.."\nRequests: "..state.attempts.." • Removed after request: "..state.removed.." • Unconfirmed: "..state.unconfirmed
-   local w=ledger.current or ledger.history[#ledger.history]
-   if w then
-    local n,k=w.normal,w.king
-    local r=w.lastObservedRemaining or {total=0}
-    S.zombieInfo.Text..="\nWave #"..w.id.." • Seen / Tried / Removed".."\nNormal: "..n.seen.." / "..n.attempted.." / "..n.removed.." • King: "..k.seen.." / "..k.attempted.." / "..k.removed.."\nLast visible: "..r.total.." • Reward proof: unconfirmed"
-    local reasons={} for name,count in w.reasons do table.insert(reasons,name..": "..count) end table.sort(reasons)
-    if #reasons>0 then S.zombieInfo.Text..="\n"..table.concat(reasons," • ") end
-   end
-  end
- end
- worker("Auto Zombie",0.3,function()
-  observe()
-  report()
-  if not X.autoZombie then state.status="OFF" report() return end
-  if type(fireproximityprompt)~="function" then state.status="Executor cannot activate proximity prompts" report() return end
-  local remaining=math.ceil(G.BlueFarmZombieReadyAt-os.clock())
-  if remaining>0 then state.status="Join safety wait: "..remaining.."s" report() return end
-  if not wave.IsWaveActive() then
-   local seconds=wave.GetSecondsUntilNextWave()
-   state.status="Next wave: "..math.ceil(seconds).."s" report() return
-  end
-  if S.variantTokenHasPriority and S.variantTokenHasPriority() then state.status="Waiting for urgent Variant Token" return end
-  if S.characterTaskBusy() or S.nativeMenuRequested or S.selectingTraining or S.travelSuspended or manualControl() then state.status="Waiting for active task / scene" return end
-  local char=P.Character local root=char and char:FindFirstChild("HumanoidRootPart") local human=char and char:FindFirstChildOfClass("Humanoid")
-  if not root or not human or human.Health<=0 or char:FindFirstChild("KnockBodyPosition",true) or workspace.CurrentCamera and workspace.CurrentCamera.CameraType==Enum.CameraType.Scriptable then state.status="Waiting for character / scene" return end
-  local row=targetRows()[1]
-  if not row then state.status="Wave active • Waiting for zombies" return end
-  if not row.king and candyPending() then state.status="Collecting Candy first • Watching for King" return end
-  if collect.walking then S.stopCollectionTravel() end
-  if collect.walking or S.characterTaskBusy() then return end
-  local model,part=row.model,row.part
-  local attemptWave=ledger.current
-  if attemptWave and not attemptWave.attempted[model] then attemptWave.attempted[model]=true bucket(attemptWave,model).attempted+=1 end
-  local failureReason
-  local function failed(reason)
-   if failureReason then return end failureReason=reason
-   event(reason,model,nil,attemptWave)
-   if attemptWave then bucket(attemptWave,model).failed+=1 end
-  end
-  local function invalidReason()
-   if not wave.IsWaveActive() then return "wave_ended" end
-   if not X.autoZombie or not S.enabled then return "cancelled" end
-   if P.Character~=char or human.Health<=0 then return "character_unavailable" end
-   if not model:IsDescendantOf(workspace) or not CS:HasTag(model,"SpawnedZombie") then return "target_disappeared_before_request" end
-   return "interrupted_by_input_or_scene"
-  end
-  local function valid()
-   return alive() and S.enabled and X.autoZombie and wave.IsWaveActive() and P.Character==char and human.Health>0 and model:IsDescendantOf(workspace) and part.Parent~=nil and root.Parent~=nil and CS:HasTag(model,"SpawnedZombie") and not S.nativeMenuRequested and not (S.variantTokenHasPriority and S.variantTokenHasPriority()) and not S.halloweenSceneActive and not S.graveSceneActive and not char:FindFirstChild("KnockBodyPosition",true) and not manualControl()
-  end
-  S.zombieTravel=true
-  local ok,err=pcall(function()
-   state.status="Approaching "..model.Name report()
-   for approach=1,3 do
-    if not valid() or (root.Position-part.Position).Magnitude<=7 then break end
-    local offset=root.Position-part.Position
-    offset=Vector3.new(offset.X,0,offset.Z)
-    if offset.Magnitude<0.1 then offset=Vector3.new(1,0,0) end
-    local point=part.Position+offset.Unit*4
-    if not S.travelTo(CFrame.new(point)*root.CFrame.Rotation,valid) then failed(not valid() and invalidReason() or "route_unavailable") state.status="Route unavailable • Retrying later" return end
-   end
-   if not valid() then failed(invalidReason()) return end
-   if (root.Position-part.Position).Magnitude>10 then failed("target_moved_out_of_range") return end
-   local prompt=part:FindFirstChildOfClass("ProximityPrompt")
-   if not prompt or not prompt.Enabled then failed("prompt_unavailable") state.status="Waiting for native zombie prompt" return end
-   if (root.Position-part.Position).Magnitude>math.min(10,prompt.MaxActivationDistance) then failed("activation_distance_exceeded") state.status="Zombie moved out of reach • Rechecking" return end
-   if type(fireproximityprompt)~="function" then state.status="Executor cannot activate proximity prompts" return end
-   state.attempts+=1 state.status="Collecting "..model.Name report()
-   local before=tonumber(P:GetAttribute("CurrencyHalloween_2026"))
-   if attemptWave then bucket(attemptWave,model).requests+=1 end
-   fireproximityprompt(prompt)
-   local deadline=os.clock()+2
-   repeat task.wait(0.1) until not valid() or not CS:HasTag(model,"SpawnedZombie") or os.clock()>=deadline
-   -- Removal is observable, but does not prove this player received the reward.
-   if not model:IsDescendantOf(workspace) or not CS:HasTag(model,"SpawnedZombie") then
-    if not wave.IsWaveActive() then failed("wave_ended_after_request")
-    else candyGraceUntil=os.clock()+1.5 state.removed+=1 if attemptWave then bucket(attemptWave,model).removed+=1 end end
-    state.status="Target removed • Reward not independently confirmed"
-   else failed(not valid() and invalidReason() or "no_server_confirmation") state.unconfirmed+=1 state.status="No confirmation • Retrying later" end
-   local after=tonumber(P:GetAttribute("CurrencyHalloween_2026"))
-   if before and after and after>before and attemptWave then
-    table.insert(attemptWave.evidence,{at=workspace:GetServerTimeNow(),kind=model.Name,currencyDelta=after-before,
-     attribution="Unattributed currency increase during request; may include other activities",confirmed=false})
-    if #attemptWave.evidence>100 then table.remove(attemptWave.evidence,1) end
-   end
-  end)
-  if not ok then failed("runtime_error") end
-  failures[model]=(failures[model] or 0)+1
-  retry[model]=os.clock()+(failures[model]>=3 and 20 or 3)
-  S.zombieTravel=false
-  if not ok then state.status="Error: "..tostring(err) error(err) end
-  report()
- end)
-end)() end
-
-do (function()
- local state={status="OFF",started=0,completed=0,reveals=0,cornDrops=0,unitsAdded=0,candyGained=0}
- S.grave=state
- S.graveDrops={} S.graveDropReceipts={} S.graveDropMissing={} S.graveDropSeen={}
- state.dropsConfirmed=0 state.dropsUnconfirmed=0
- local dayModule=RS.Shared.Services:FindFirstChild("DayNightService")
- local day=dayModule and require(dayModule)
-   S.graveMustYield=function()
-   -- Reserve the entire active zombie wave; finish any already-running native dig scene.
-   local zombieWaveModule=RS.Shared.Services:FindFirstChild("ZombieWaveService")
-   if zombieWaveModule then
-    local ok,service=pcall(require,zombieWaveModule)
-    if ok and type(service)=="table" and type(service.IsWaveActive)=="function" and service.IsWaveActive() then return true end
-   end
-   if S.zombieHasPriority and S.zombieHasPriority() then return true end
-  if S.variantTokenHasPriority() then return true end
-  if S.halloweenTravel or S.halloweenSceneActive then return true end
-  if not (X.halloween and X.halloweenHouses) then return false end
-  if not day or type(day.CanTrickOrTreat)~="function" then return true end
-  if day.CanTrickOrTreat() then return true end
-  -- Leave enough time for the native dig / reveal before the next night.
-  if type(day.GetSecondsUntilChange)~="function" then return true end
-  return day.GetSecondsUntilChange()<=95
- end
- S.graveHasPriority=function()
-  if not S.graveSceneActive and S.variantTokenHasPriority() then return false end
-  return not S.nativeMenuRequested and X.autoGrave and not S.graveMustYield() and
-   (S.graveTravel or S.graveSceneActive or (state.availableGraves or 0)>0 and S.graveCandidateAllowed and S.graveCandidateAllowed(X.graveUnit))
- end
- local handlers={} local nextScan=0 local retry={} local pending local yieldUntil=0
- S.graveCandidateAllowed=function(id)
-  local unit=D.GetData().PlayerUnits[id]
-  return unit~=nil and not unit.Equipped and not U.IsPlayerUnitFavorited(P,id) and not S.reservedUnits[id] and not S.trainingQueueProtected[id] and not S.towerProtected[id] and not S.towerActiveUnits[id] and G.BlueFarmSpareSale.pending~=id
- end
- S.refreshGraveInfo=function()
-  if not S.graveInfo or not S.graveInfo.Parent then return end
-  local unit=D.GetData().PlayerUnits[X.graveUnit]
-  S.graveInfo.Text="Digging Striker: "..(unit and unit.PlayerUnitName.." • Lv."..tostring(unit.Level) or "None selected").."\n"..state.status.."\nStarted: "..state.started.." • Graves confirmed: "..state.completed.."\nNew Strikers: "..state.unitsAdded.." • Candy drops: "..state.cornDrops.."\nPickup confirmed: "..state.dropsConfirmed.." • Removed without confirmation: "..state.dropsUnconfirmed
- end
- S.pickGraveUnit=function()
-  if S.selectingTraining or (S.characterTaskBusy() or S.inventoryBusy or S.baseBusy) and not S.nativeMenuRequested then state.status="Wait for the active trip / scene" return end
-  local native=P.PlayerGui:FindFirstChild("SelectGui") local frame=native and native:FindFirstChild("MainFrame")
-  if not frame then state.status="Native Striker picker unavailable" return end
-  S.selectingTraining=true
-  local previous=panel.Visible local c
-  local function restore()
-   S.selectingTraining=false if c then c:Disconnect() c=nil end
-   if S.running and panel.Parent then if S.setMinimized then S.setMinimized(false,true) else panel.Visible=true end end
-   S.refreshGraveInfo()
-  end
-  local ok,err=pcall(function()
-   local excluded={} for id in D.GetData().PlayerUnits do if not S.graveCandidateAllowed(id) then excluded[id]=true end end
-   panel.Visible=false
-   require(RS.Client.Core.Gui.SelectGuiClient).Open(function(id)
-    if S.graveCandidateAllowed(id) then X.graveUnit=id state.status=X.autoGrave and "Selected • Starting Auto Grave" or "Selected • Enable Auto Grave to start" S.saveConfig() else state.status="This Striker is protected or unavailable" end
-    restore()
-   end,nil,excluded,{IncludeEquipped=false})
-   c=frame:GetPropertyChangedSignal("Visible"):Connect(function()if not frame.Visible then restore() end end)
-   table.insert(connections,c)
-  end)
-  if not ok then state.status="Picker: "..tostring(err) restore() end
- end
- S.requestGraveSelection=function()
-  if S.graveSelectionQueued or S.selectingTraining then return end
-  S.graveSelectionQueued=true
-  task.spawn(function()
-   local deadline=os.clock()+8
-   repeat
-    if not alive() or not X.autoGrave then break end
-    if not S.characterTaskBusy() and not S.inventoryBusy and not S.baseBusy and not S.selectingTraining then
-     S.pickGraveUnit()
-     if S.selectingTraining then break end
-    end
-    task.wait(0.1)
-   until os.clock()>=deadline
-   S.graveSelectionQueued=false
-  end)
- end
- local function snapshot()
-  local units={} for id,u in D.GetData().PlayerUnits do units[id]=true end
-  local corn={} for id in S.getHalloweenCornRows() or {} do corn[id]=true end
-  return {units=units,corn=corn,candy=tonumber(P:GetAttribute("CurrencyHalloween_2026")) or 0}
- end
- local function clearPending()
-  local done=pending
-  if done then S.graveDropWatch={position=done.handler.Part.Position,before=done.before.corn,expires=os.clock()+3} end
-  pending=nil S.graveSceneActive=false S.graveTravel=false yieldUntil=os.clock()+0.15
-  if done and done.previous and done.previous.Parent and P.Character==done.char then
-   local human=done.char:FindFirstChildOfClass("Humanoid")
-   if human and human.Health>0 and done.char:FindFirstChildOfClass("Tool")==done.tool then pcall(human.EquipTool,human,done.previous) end
-  end
-  if S.graveOwnsInventory then S.graveOwnsInventory=false S.releaseInventory("Auto Grave") end
- end
- table.insert(connections,P.CharacterAdded:Connect(function()
-  if pending then state.status="Respawned • Rechecking grave queue" clearPending() end
- end))
- worker("Auto Grave",0.1,function()
-  S.refreshGraveInfo()
-  local liveDrops=S.getHalloweenCornRows() or {}
-  local watch=S.graveDropWatch
-  if watch and os.clock()<=watch.expires then
-   for id,row in liveDrops do
-    if not watch.before[id] and not S.graveDropSeen[id] and typeof(row.Position)=="Vector3" and (row.Position-watch.position).Magnitude<=30 then
-     S.graveDrops[id]=true S.graveDropSeen[id]=true state.cornDrops+=1
-    end
-   end
-  elseif watch then S.graveDropWatch=nil end
-  for dropId in S.graveDrops do
-   if not liveDrops[dropId] then
-    S.graveDropMissing[dropId]=S.graveDropMissing[dropId] or os.clock()
-    if os.clock()-S.graveDropMissing[dropId]>=3 then
-     if S.graveDropReceipts[dropId] then state.dropsConfirmed+=1 else state.dropsUnconfirmed+=1 end
-     S.graveDrops[dropId]=nil S.graveDropReceipts[dropId]=nil S.graveDropMissing[dropId]=nil
-    end
-   else S.graveDropMissing[dropId]=nil end
-  end
-  if pending then
-   local h=pending.handler local part=h.Part
-   pending.newUnits=pending.newUnits or {} pending.newCorn=pending.newCorn or {}
-   for id in D.GetData().PlayerUnits do
-    if not pending.before.units[id] and not pending.newUnits[id] then pending.newUnits[id]=true state.unitsAdded+=1 end
-   end
-   for id,row in S.getHalloweenCornRows() or {} do
-    if not pending.before.corn[id] and not pending.newCorn[id] and typeof(row.Position)=="Vector3" and (row.Position-part.Position).Magnitude<=30 then
-     pending.newCorn[id]=true S.graveDrops[id]=true S.graveDropSeen[id]=true pending.lastDropAt=os.clock() state.cornDrops+=1
-    end
-   end
-   local gain=math.max(0,(tonumber(P:GetAttribute("CurrencyHalloween_2026")) or 0)-pending.before.candy)
-   if gain>(pending.countedCandy or 0) then state.candyGained+=gain-(pending.countedCandy or 0) pending.countedCandy=gain end
-   if h._isRevealing and not pending.revealed then
-    pending.revealed=true state.reveals+=1 state.status="Native grave reveal confirmed • Waiting for scene"
-   end
-   if next(pending.newCorn) then pending.lastDropAt=pending.lastDropAt or os.clock() end
-   local cleared=not part.Parent or part:GetAttribute("Spawned")==false
-   if not pending.confirmed and (pending.revealed or cleared and (next(pending.newCorn) or next(pending.newUnits) or gain>0)) then
-    pending.confirmed=true state.completed+=1 state.status="Grave reward confirmed • Collecting Candy Corn next"
-   end
-   local camera=workspace.CurrentCamera
-   local revealing=h._isRevealing or camera and camera.CameraType==Enum.CameraType.Scriptable
-   S.graveSceneActive=true
-   if pending.confirmed and not revealing and (cleared or part:GetAttribute("DiggerUserId")~=P.UserId) then
-    S.graveCornPending=X.autoGrave and X.graveCollect and next(pending.newCorn)~=nil
-    state.status="Grave complete • Collecting / continuing" clearPending() return
-   end
-   if not pending.revealed and (not part.Parent or part:GetAttribute("DiggerUserId")~=P.UserId) and os.clock()-pending.at>35 then state.status="Dig ended without confirmed reveal • Will recheck other graves" retry[part]=os.clock()+15 clearPending() return end
-   if os.clock()-pending.at>90 then
-    state.status="Native grave scene taking longer than expected"
-    if not revealing and (not part.Parent or part:GetAttribute("DiggerUserId")~=P.UserId) then clearPending() end
-   end
-   return
-  end
-  if not S.enabled then state.status="Paused" return end
-  if S.nativeMenuRequested then state.status="Waiting for game menu" return end
-  if not X.autoGrave then if state.started==0 then state.status="OFF" end return end
-  if os.clock()<yieldUntil or S.graveDropWatch then return end
-  if S.variantTokenHasPriority() then state.status="Auto Grave paused • Collecting Variant Token first" return end
-  if S.graveMustYield() then state.status="Waiting for prioritized Zombie / Halloween activity" return end
-  if S.travelSuspended then state.status="Travel paused • Check diagnostics" return end
-  if X.graveCollect and S.graveCornPending then state.status="Collecting Candy Corn before next grave" return end
-  if S.halloweenTravel or S.halloweenSceneActive or S.sharedTravelActive or S.trainingTravel or S.obbyTravel or S.tpReturnActive or S.selectingTraining or S.shopOpen or collect.walking then state.status="Waiting for another task" return end
-  if manualControl() then state.status="Paused by movement input" return end
-  local id=X.graveUnit
-  if id=="" or not S.graveCandidateAllowed(id) then state.status="Select an available spare Striker (no Favorite / Base / Training / Tower)" return end
-  local char=P.Character local root=char and char:FindFirstChild("HumanoidRootPart") local human=char and char:FindFirstChildOfClass("Humanoid")
-  if not root or not human or human.Health<=0 or human.Sit or root.Anchored then state.status="Waiting for character" return end
-  
-  if os.clock()>=nextScan then
-   nextScan=os.clock()+(S.mobileLite and 6 or 2) handlers={}
-   for _,h in S.cachedHandlerTables({"Part","GraveMaid","DigMaid","UnitMaid","HintMaid","CutsceneMaid"}) do
-    if typeof(h.Part)=="Instance" and h.Part:IsDescendantOf(workspace) and type(h._tryDig)=="function" then table.insert(handlers,h) end
-   end
-  end
-  local target,point,nearest
-  for _,h in handlers do
-   local p=h.Part
-   if p.Parent and p:GetAttribute("Spawned")==true and p:GetAttribute("DiggerUserId")==nil and h._gravestone and not h._isRevealing and os.clock()>=(retry[p] or 0) then
-    for _,offset in {Vector3.new(0,3,3),Vector3.new(3,3,0),Vector3.new(0,3,-3),Vector3.new(-3,3,0)} do
-     local safe=S.checkCollectionGround(p.Position+offset)
-     if safe and (safe-p.Position).Magnitude<=10 then local d=(root.Position-safe).Magnitude if not nearest or d<nearest then target=h point=safe nearest=d end break end
-    end
-   end
-  end
-  state.mapGraves=#handlers state.availableGraves=0 state.busyGraves=0
-  for _,h in handlers do
-   local p=h.Part
-   if p.Parent and p:GetAttribute("Spawned")==true then
-    if p:GetAttribute("DiggerUserId")==nil then state.availableGraves+=1 else state.busyGraves+=1 end
-   end
-  end
-  if not target then state.status="Waiting for available graves • Ready: "..state.availableGraves.." / Map: "..state.mapGraves return end
-  if not INV.HasInventorySpace(P,1) then state.status="Inventory full • Free one Striker slot to continue digging (drops still collected)" return end
-  if not S.acquireInventory("Auto Grave") then state.status="Queued for inventory" return end
-  S.graveTravel=true S.graveOwnsInventory=true
-  local previous=char:FindFirstChildOfClass("Tool")
-  local ok,err=pcall(function()
-   if not S.travelTo(CFrame.new(point)*root.CFrame.Rotation,function()return alive() and X.autoGrave and not S.graveMustYield() and X.graveUnit==id and P.Character==char and S.graveCandidateAllowed(id) and target.Part.Parent~=nil end) then state.status="No safe grave route" retry[target.Part]=os.clock()+15 return end
-   if not X.autoGrave or S.graveMustYield() or X.graveUnit~=id or P.Character~=char or not S.graveCandidateAllowed(id) or target.Part:GetAttribute("DiggerUserId")~=nil or not target._gravestone then return end
-   local tool=toolFor("PlayerUnit",id)
-   if not tool then state.status="Selected Striker tool not replicated yet" return end
-   human:EquipTool(tool)
-   if not waitFor(function()return tool.Parent==char end,1) then state.status="Could not equip digging Striker" return end
-   task.wait(0.18)
-   if not X.autoGrave or not S.enabled or S.graveMustYield() or not S.graveCandidateAllowed(id) or char:FindFirstChildOfClass("Tool")~=tool or (root.Position-target.Part.Position).Magnitude>10 then return end
-   local before=snapshot()
-   state.status="Starting native dig • "..target.Part.Name
-   target:_tryDig()
-   local acknowledged=waitFor(function()return target.Part:GetAttribute("DiggerUserId")==P.UserId or target._isRevealing or P.Character~=char end,2)
-   if acknowledged and (target.Part:GetAttribute("DiggerUserId")==P.UserId or target._isRevealing) then
-    pending={handler=target,at=os.clock(),before=before,char=char,tool=tool,previous=previous} state.started+=1 state.lastStartAt=os.clock() state.lastGrave=target.Part.Name S.graveSceneActive=true
-    state.status="Digging • Inventory automation continues"
-    S.graveOwnsInventory=false S.releaseInventory("Auto Grave")
-    if previous and previous~=tool and previous.Parent and P.Character==char then pcall(human.EquipTool,human,previous)
-    elseif tool.Parent==char then human:UnequipTools() end
-   else state.status="Dig not confirmed • Will recheck later" retry[target.Part]=os.clock()+15 end
-  end)
-  if not pending then
-   if previous and previous.Parent and human.Parent then pcall(human.EquipTool,human,previous) end
-   S.graveOwnsInventory=false S.releaseInventory("Auto Grave")
-  end
-  S.graveTravel=false
-  if not ok then state.status="Grave: "..tostring(err) error(err) end
- end)
-end)() end
 
 local function confirmObbyHome(char,root,human)
  if P.Character~=char or not root.Parent or human.Health<=0 then return false end
@@ -5681,9 +4797,8 @@ end
 S.obbyAttempts={}
 worker("Auto Obby",0.15,function()
  if not X.autoObby or S.nativeMenuRequested then return end
- if S.halloweenHasPriority() or S.graveHasPriority and S.graveHasPriority() then S.obbyStatus="Waiting for prioritized Halloween / Grave route" return end
  if S.travelSuspended then S.obbyStatus="Travel paused • Check Travel diagnostics" return end
- if S.zombieTravel or S.graveTravel or S.graveSceneActive or S.trainingTravel or S.halloweenTravel or S.halloweenSceneActive or S.tpReturnActive or S.sharedTravelActive or S.selectingTraining or S.shopOpen or collect.walking then S.obbyStatus="Waiting for Training / Collection / Shop" return end
+ if S.trainingTravel or S.tpReturnActive or S.sharedTravelActive or S.selectingTraining or S.shopOpen or collect.walking then S.obbyStatus="Waiting for Training / Collection / Shop" return end
  if manualControl() then S.obbyStatus="Waiting: release movement keys for "..S.travelValue("travelManualPause").." seconds" return end
  local char=P.Character local root=char and char:FindFirstChild("HumanoidRootPart") local human=char and char:FindFirstChildOfClass("Humanoid")
  if not root or not human or human.Health<=0 or human.Sit then S.obbyStatus="Waiting for character control" return end
@@ -5716,7 +4831,7 @@ worker("Auto Obby",0.15,function()
  local destination=safeStanding(target.Position+Vector3.new(0,4,0),char,human,root)
  if not destination then S.obbyStatus="No safe bonus platform" return end
  local before=OB.GetBonusCooldownTimeLeft(P,target.Name)
- local travelled,reason=S.travelTo(CFrame.new(destination)*origin.Rotation,function()return alive() and X.autoObby and not S.halloweenHasPriority() and not (S.graveHasPriority and S.graveHasPriority()) and target:IsDescendantOf(workspace) and P.Character==char end,true)
+ local travelled,reason=S.travelTo(CFrame.new(destination)*origin.Rotation,function()return alive() and X.autoObby and target:IsDescendantOf(workspace) and P.Character==char end,true)
  if not travelled then S.obbyStatus=target.Name.." • "..(reason or "No safe route in "..X.collectMode) return end
  if not alive() or not S.enabled or not X.autoObby or manualControl() or P.Character~=char or human.Health<=0 or not target.Parent then return end
  if (root.Position-destination).Magnitude>3 then S.obbyStatus="Bonus travel not confirmed" return end
@@ -5735,12 +4850,12 @@ worker("Auto Obby",0.15,function()
  local rewardStatus=S.obbyStatus
  local homeOK,homeResult=true,nil
  local continueRoute=false
- if ok and X.autoObby and S.enabled and not S.halloweenHasPriority() and not (S.graveHasPriority and S.graveHasPriority()) and P.Character==char and human.Health>0 then
+ if ok and X.autoObby and S.enabled and P.Character==char and human.Health>0 then
   for _,part in CS:GetTagged("ObbyBonusPart") do
    if part~=target and part:IsA("BasePart") and part:IsDescendantOf(workspace) and OB.CanClaimBonus(P,part.Name) and os.clock()-(S.obbyAttempts[part.Name] or -math.huge)>=2 then continueRoute=true break end
   end
  end
- if not continueRoute and not S.halloweenHasPriority() and not (S.graveHasPriority and S.graveHasPriority()) and P.Character==char and root.Parent and human.Health>0 then homeOK,homeResult=pcall(confirmObbyHome,char,root,human) end
+ if not continueRoute and P.Character==char and root.Parent and human.Health>0 then homeOK,homeResult=pcall(confirmObbyHome,char,root,human) end
  S.obbyTravel=false
  if continueRoute then S.obbyStatus=rewardStatus.." • Continuing to next ready bonus"
  elseif homeOK then S.obbyStatus=rewardStatus.." • "..(homeResult==true and "Home confirmed" or "Home return not confirmed") end
@@ -5761,15 +4876,7 @@ worker("Events",0.15,function()
  for _,m in markers do m.seen=false end
  local root=P.Character and P.Character:FindFirstChild("HumanoidRootPart")
  if not root then clearMarkers() candidates={} return end
- if X.graveESP then
-  if ready("graveESPScan",S.mobileLite and 3 or 1) then S.graveESPParts=workspace:QueryDescendants("BasePart[$GravestoneName]") end
-  for _,part in S.graveESPParts or {} do
-   if part:IsDescendantOf(workspace) and part:GetAttribute("DiggerUserId")==nil and tostring(part:GetAttribute("GravestoneName") or "")~="" then
-    mark(part,part,part.Position,"Grave • "..tostring(part:GetAttribute("GravestoneName"))..string.format(" • %.0fm",(root.Position-part.Position).Magnitude))
-   end
-  end
- end
- if (X.mapCollect or X.events or X.halloween or X.autoGrave) and ready("pickupVisuals",S.mobileLite and 3 or 1) then
+ if (X.mapCollect or X.events) and ready("pickupVisuals",S.mobileLite and 3 or 1) then
  local visuals={}
  for _,handler in S.cachedHandlerTables({"Node","BasePosition","TokenMaid"}) do
  if typeof(handler.Node)=="Instance" and typeof(handler._token)=="Instance" and handler._token:IsDescendantOf(workspace) then visuals[handler.Node]=handler._token end
@@ -5863,7 +4970,7 @@ task.spawn(function()
  local ok,err=pcall(function()
  if S.travelSuspended then collect.status="Travel paused • Check Travel diagnostics" stopWalking() return end
  if S.tpReturnActive then return end
- if not S.enabled or S.nativeMenuRequested or S.graveHasPriority and S.graveHasPriority() or not (X.mapCollect or X.events or X.halloween or X.autoGrave) or S.selectingTraining or S.trainingTravel or S.tpReturnActive or S.sharedTravelActive or S.halloweenTravel or S.halloweenSceneActive or S.graveTravel or S.graveSceneActive or S.obbyTravel or S.shopOpen or S.halloweenHasPriority() then stopWalking() return end
+ if not S.enabled or S.nativeMenuRequested or not (X.mapCollect or X.events) or S.selectingTraining or S.trainingTravel or S.tpReturnActive or S.sharedTravelActive or S.obbyTravel or S.shopOpen then stopWalking() return end
  if manualControl() then collect.status="พักเดิน: กำลังควบคุมตัวละคร" stopWalking() return end
  local character=P.Character local root=character and character:FindFirstChild("HumanoidRootPart")
  local human=character and character:FindFirstChildOfClass("Humanoid")
@@ -5888,7 +4995,7 @@ task.spawn(function()
  collect.walking=true collect.target=target.name collect.variantNode=target.kind=="variant" and target.node or nil collect.mode=mode walkingHumanoid=human
  collect.status="กำลังเก็บด้วย "..mode.." • "..target.name
  local function continuing()
- return alive() and S.enabled and X.collectMode==mode and not S.selectingTraining and not S.trainingTravel and not S.obbyTravel and not S.graveTravel and not S.graveSceneActive and not S.shopOpen and not S.nativeMenuRequested and not (S.graveHasPriority and S.graveHasPriority()) and not S.halloweenHasPriority() and not S.halloweenTravel and not S.halloweenSceneActive and (target.kind=="variant" or not S.variantTokenHasPriority()) and enabledTarget(target) and exists(target) and not manualControl() and P.Character==character and root.Parent~=nil and human.Health>0
+ return alive() and S.enabled and X.collectMode==mode and not S.selectingTraining and not S.trainingTravel and not S.obbyTravel and not S.shopOpen and not S.nativeMenuRequested and (target.kind=="variant" or not S.variantTokenHasPriority()) and enabledTarget(target) and exists(target) and not manualControl() and P.Character==character and root.Parent~=nil and human.Health>0
  end
  local params=RaycastParams.new() params.FilterType=Enum.RaycastFilterType.Exclude
  local excluded={character} if target.node then table.insert(excluded,target.node) end
@@ -6098,7 +5205,6 @@ task.spawn(function()
  current("Crate Sales",X.autoSellCrates,S.ballCollectStatus)
  current("Polisher",X.polisher,status.Polisher)
  current("Polished Crate Sales",X.autoSellPolishedCrates or X.polisherGoldenHourOnly,S.ballSales and ("Confirmed: "..S.ballSales.polished))
- current("Auto Grave",X.autoGrave,S.grave and S.grave.status)
  current("Potions",X.luckPotion or X.cashPotion or X.speedPotion or X.bluetooth,status.Potions)
  current("Market",X.market,status.Market)
  current("Skin Sales",X.skinSell,S.skinSale and S.skinSale.status)
@@ -6106,8 +5212,8 @@ task.spawn(function()
  current("Skin Equip",X.skinEquip,S.skinEquipStatus)
  current("Training",X.grade or X.trait,status.Training)
  current("Tower",X.tower,status.Tower)
+ current("Tournament",X.autoTournament,S.tournament and S.tournament.status)
  current("Map / Events",X.mapCollect or X.events,status.Events)
- current("Halloween",X.halloween,S.halloween and S.halloween.status)
  current("Auto Obby",X.autoObby,S.obbyStatus)
  local anti=G.FyrelithAntiAFK
  table.insert(rows,"Anti AFK: "..((not anti or not anti.Alive) and "Unavailable" or anti.LastError and ("ERROR • "..tostring(anti.LastError)) or ("Always ON • Pulses "..tostring(anti.Pulses or 0).." • "..tostring(anti.Method or "Ready"))))
@@ -6164,6 +5270,7 @@ local function due(name,delay)
  return true
 end
 local function owned(reward)
+ if type(reward)~="table" then return nil end
  local d=data.GetData()
  if reward.Type=="Box" then
  local variants=d.Inventory.Boxes[reward.BoxName]
@@ -6182,7 +5289,7 @@ end
 task.spawn(function()
  while state.running and S.running and gui.Parent do
  local farm=env.BlueFarm
- if X.rewards and farm and farm.running and farm.enabled and not S.graveOwnsInventory then
+ if X.rewards and farm and farm.running and farm.enabled then
  local ok,err=pcall(function()
  if offlinePending and due("offline",5) then
  offlinePending=false
@@ -6208,11 +5315,11 @@ task.spawn(function()
  for i,entry in rewards.Rewards do
  if not state.running then break end
  if play.CanClaim(p,i) and due("play:"..i,30) then
- local reward=entry.Rewards[1]
+ local reward=play.GetReward(p,i)
  local before=owned(reward)
  if before~=nil then
  remotes.ClaimPlaytimeReward:FireServer(i)
- if waitFor(function()return (owned(reward) or 0)>before end) then
+ if waitFor(function()return play.IsClaimed(p,i) or (owned(reward) or 0)>before end) then
  play.MarkClaimed(p,i)
  state.claimed+=1
  state.status="Playtime reward "..i.." confirmed"
@@ -6271,7 +5378,7 @@ task.spawn(function()
  local inFlight=setmetatable({},{__mode="k"})
  local retry=setmetatable({},{__mode="k"})
  local function enabled()
-  return state.running and S.running and env.BlueFarm==S and gui.Parent~=nil and S.enabled and X.fastOpen and not S.graveOwnsInventory
+  return state.running and S.running and env.BlueFarm==S and gui.Parent~=nil and S.enabled and X.fastOpen
  end
  state.attempts=0 state.unconfirmed=0 state.inFlight=0
  while state.running and S.running and gui.Parent do

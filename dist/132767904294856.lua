@@ -672,9 +672,12 @@ S.notePolisherPickup=function(part)
  if timer then timer.sentAt=os.clock() timer.sentCount=tonumber(part:GetAttribute("PendingBallCount")) or 0 end
 end
 -- Shared task coordination after removal of Halloween and grave automation.
-S.variantTokenHasPriority=function()return false end
+S.variantTokenHasPriority=function()
+ local c=S.collect
+ return c~=nil and c.walking==true and c.variantNode~=nil and c.variantNode.Parent~=nil and c.variantNode:GetAttribute("Occupied")==true
+end
 S.characterTaskBusy=function()
- return S.trainingTravel or S.obbyTravel or S.sharedTravelActive or S.tpReturnActive or S.shopOpen
+ return (S.collect and S.collect.walking) or S.trainingTravel or S.obbyTravel or S.sharedTravelActive or S.tpReturnActive or S.shopOpen
 end
 for _,id in X.towerTeam do S.towerProtected[id]=true end
 if X.unit and D.GetData().PlayerUnits[X.unit] then S.reservedUnits[X.unit]=true else X.unit=nil end
@@ -4083,7 +4086,7 @@ worker("Training",0.02,function()
  if type(cost)~="number" or cost<0 or cost==math.huge or cost>(D.GetData().Currency.Cash or 0) then X.grade=false S.trainingStops.grade="Not enough cash" status.Training="เงินไม่พอสุ่ม Grade" continue end
  end
  local needsTravel=not GS.CanReachRollStation(P,service.HITBOX_TAG)
- if needsTravel and (S.tpReturnActive or S.sharedTravelActive or S.obbyTravel or S.shopOpen) then
+ if needsTravel and ((S.collect and S.collect.walking) or S.tpReturnActive or S.sharedTravelActive or S.obbyTravel or S.shopOpen) then
   status.Training=token.." • Waiting for station travel; Auto remains ON" continue
  end
  if needsTravel and not X.trainingTP then
@@ -4637,6 +4640,7 @@ do
  end
  table.insert(connections,gui.Destroying:Connect(S.cancelSharedTravel))
  S.travelTo=function(frame,keepGoing,directTween)
+  if S.collect and S.collect.walking then return false,"Collection owns character movement" end
   if S.travelSuspended then return false,"Travel is paused after a recovery" end
   if active then return false,"Another trip is active" end
   local char=P.Character local root=char and char:FindFirstChild("HumanoidRootPart") local human=char and char:FindFirstChildOfClass("Humanoid")
@@ -5006,7 +5010,7 @@ task.spawn(function()
  end
  local approach=target.pos
  local destinationPoint
- local offsets={Vector3.new(3,0,0),Vector3.new(-3,0,0),Vector3.new(0,0,3),Vector3.new(0,0,-3),Vector3.zero}
+ local offsets=target.kind=="variant" and {Vector3.zero,Vector3.new(1.5,0,0),Vector3.new(-1.5,0,0),Vector3.new(0,0,1.5),Vector3.new(0,0,-1.5)} or {Vector3.new(3,0,0),Vector3.new(-3,0,0),Vector3.new(0,0,3),Vector3.new(0,0,-3),Vector3.zero}
  local attempted=target.node and S.attemptedTargets[target.node] or S.attemptedRain[target.id]
  local shift=type(attempted)=="table" and attempted.count or 0
  for index=1,#offsets do
@@ -5033,8 +5037,8 @@ task.spawn(function()
  if not S.performTP(CFrame.new(approach)*root.CFrame.Rotation,continuing,"collection outward",target.node) then root.Anchored=trip.wasAnchored tpTrip=nil stopWalking() return end
  collect.teleports=(collect.teleports or 0)+1
  -- Let the character position replicate before the first pickup request.
- local requestAt=os.clock()+S.travelValue("travelSettle")
- local finish=requestAt+S.travelValue("pickupTimeout")
+ local requestAt=os.clock()+(target.kind=="variant" and math.max(0.35,S.travelValue("travelSettle")) or S.travelValue("travelSettle"))
+ local finish=requestAt+(target.kind=="variant" and math.max(4,S.travelValue("pickupTimeout")) or S.travelValue("pickupTimeout"))
  repeat
  task.wait(0.02)
  -- Release after one replication frame so the server receives the new
